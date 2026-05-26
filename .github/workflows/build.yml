@@ -37,7 +37,11 @@ jobs:
             libobs-dev \
             cmake ninja-build pkg-config \
             qt6-base-dev \
-            libasound2-dev
+            libasound2-dev \
+            libgl-dev \
+            libglx-dev \
+            libx11-dev \
+            libxkbcommon-dev
 
       - name: Configure CMake
         run: |
@@ -61,10 +65,13 @@ jobs:
           retention-days: 14
 
   # ───────────────────────────────────────────────────────────────────────────
-  # MACOS — Homebrew provides obs-studio with cmake config included
+  # MACOS — obs-studio was removed as a Homebrew formula (cask only now, no
+  # dev headers). Build libobs from source, same pattern as Windows.
+  # Cache keyed to OBS version so the slow build only runs once.
+  # Phase 1: arm64 only. Universal binary lipo step added once CI is green.
   # ───────────────────────────────────────────────────────────────────────────
   build-macos:
-    name: macOS (universal)
+    name: macOS (arm64)
     runs-on: macos-14
 
     steps:
@@ -73,56 +80,70 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies via Homebrew
+      - name: Install build tools and Qt6
         run: |
-          brew update
-          brew install cmake ninja qt@6 obs-studio
-          # Surface paths for CMake
-          echo "Qt6_DIR=$(brew --prefix qt@6)/lib/cmake/Qt6"       >> $GITHUB_ENV
-          echo "OBS_PREFIX=$(brew --prefix obs-studio)"            >> $GITHUB_ENV
+          brew install cmake ninja ffmpeg qt@6
+          echo "Qt6_DIR=$(brew --prefix qt@6)/lib/cmake/Qt6" >> $GITHUB_ENV
+          echo "FFMPEG_PREFIX=$(brew --prefix ffmpeg)"       >> $GITHUB_ENV
 
-      - name: Configure (arm64)
+      # ── OBS libobs (cached) ─────────────────────────────────────────────
+      - name: Cache OBS build
+        id: cache-obs
+        uses: actions/cache@v4
+        with:
+          path: obs-install
+          key: obs-${{ env.OBS_VERSION }}-macos-arm64-v1
+
+      - name: Clone OBS source
+        if: steps.cache-obs.outputs.cache-hit != 'true'
         run: |
-          cmake -B build-arm64 -S . -G Ninja \
+          git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
+            https://github.com/obsproject/obs-studio.git obs-source
+
+      - name: Build libobs from source
+        if: steps.cache-obs.outputs.cache-hit != 'true'
+        run: |
+          cmake -B obs-build -S obs-source \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DENABLE_PLUGINS=OFF \
+            -DENABLE_UI=OFF \
+            -DENABLE_SCRIPTING=OFF \
+            -DENABLE_BROWSER=OFF \
+            -DENABLE_WEBSOCKET=OFF \
+            -DENABLE_AJA=OFF \
+            -DENABLE_DECKLINK=OFF \
+            -DCMAKE_PREFIX_PATH="${{ env.FFMPEG_PREFIX }}" \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/obs-install"
+
+          cmake --build obs-build --target libobs --parallel
+          cmake --install obs-build --component Development
+
+      # ── Plugin build ────────────────────────────────────────────────────
+      - name: Configure plugin
+        run: |
+          cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            -DQt6_DIR="${Qt6_DIR}" \
-            -DCMAKE_PREFIX_PATH="${OBS_PREFIX}"
+            -DQt6_DIR="${{ env.Qt6_DIR }}" \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install"
 
-      - name: Configure (x86_64)
-        run: |
-          cmake -B build-x86 -S . -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
-            -DQt6_DIR="${Qt6_DIR}" \
-            -DCMAKE_PREFIX_PATH="${OBS_PREFIX}"
-
-      - name: Build both arches
-        run: |
-          cmake --build build-arm64 --parallel
-          cmake --build build-x86  --parallel
-
-      - name: Lipo universal binary
-        run: |
-          cmake --install build-arm64 --prefix dist-arm64
-          cmake --install build-x86   --prefix dist-x86
-          mkdir -p dist-universal/lib/obs-plugins
-          lipo -create \
-            dist-arm64/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so \
-            dist-x86/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so \
-            -output dist-universal/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so
-          cp -r dist-arm64/data dist-universal/data || true
+      - name: Build plugin
+        run: cmake --build build --parallel
 
       - name: Package
-        run: tar -czf ${{ env.PLUGIN_NAME }}-macos-universal.tar.gz -C dist-universal .
+        run: |
+          cmake --install build --prefix dist
+          tar -czf ${{ env.PLUGIN_NAME }}-macos-arm64.tar.gz -C dist .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PLUGIN_NAME }}-macos-universal
-          path: ${{ env.PLUGIN_NAME }}-macos-universal.tar.gz
+          name: ${{ env.PLUGIN_NAME }}-macos-arm64
+          path: ${{ env.PLUGIN_NAME }}-macos-arm64.tar.gz
           retention-days: 14
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -246,5 +267,5 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/${{ env.PLUGIN_NAME }}-windows-x64/${{ env.PLUGIN_NAME }}-windows-x64.zip
-            artifacts/${{ env.PLUGIN_NAME }}-macos-universal/${{ env.PLUGIN_NAME }}-macos-universal.tar.gz
+            artifacts/${{ env.PLUGIN_NAME }}-macos-arm64/${{ env.PLUGIN_NAME }}-macos-arm64.tar.gz
             artifacts/${{ env.PLUGIN_NAME }}-linux-x86_64/${{ env.PLUGIN_NAME }}-linux-x86_64.tar.gz
