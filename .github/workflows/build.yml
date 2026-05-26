@@ -129,8 +129,10 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path) \
             -DQt6_DIR="${{ env.Qt6_DIR }}" \
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install"
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install" \
+            -Dlibobs_DIR="${{ github.workspace }}/obs-install/Frameworks/libobs.framework/Resources/cmake"
 
       - name: Build plugin
         run: cmake --build build --parallel
