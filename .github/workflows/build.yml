@@ -120,7 +120,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/obs-install"
 
           cmake --build obs-build --target libobs --config Release --parallel
-          cmake --install obs-build --config Release --component Development
+          cmake --install obs-build --config Release
 
       # ── Plugin build ────────────────────────────────────────────────────
       - name: Configure plugin
