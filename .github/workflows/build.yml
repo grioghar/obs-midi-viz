@@ -7,19 +7,129 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel in-progress runs on new push to same branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   PLUGIN_NAME: obs-midi-viz
-  OBS_VERSION: "31.0.0"   # bump this to track OBS releases
+  OBS_VERSION: "30.2.2"
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # WINDOWS BUILD
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # LINUX — OBS PPA provides libobs-dev directly; simplest of the three
+  # ───────────────────────────────────────────────────────────────────────────
+  build-linux:
+    name: Linux (x86_64)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Add OBS PPA and install libobs-dev
+        run: |
+          sudo add-apt-repository ppa:obsproject/obs-studio -y
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libobs-dev \
+            cmake ninja-build pkg-config \
+            qt6-base-dev \
+            libasound2-dev
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -S . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package
+        run: |
+          cmake --install build --prefix dist
+          tar -czf ${{ env.PLUGIN_NAME }}-linux-x86_64.tar.gz -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PLUGIN_NAME }}-linux-x86_64
+          path: ${{ env.PLUGIN_NAME }}-linux-x86_64.tar.gz
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # MACOS — Homebrew provides obs-studio with cmake config included
+  # ───────────────────────────────────────────────────────────────────────────
+  build-macos:
+    name: macOS (universal)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies via Homebrew
+        run: |
+          brew update
+          brew install cmake ninja qt@6 obs-studio
+          # Surface paths for CMake
+          echo "Qt6_DIR=$(brew --prefix qt@6)/lib/cmake/Qt6"       >> $GITHUB_ENV
+          echo "OBS_PREFIX=$(brew --prefix obs-studio)"            >> $GITHUB_ENV
+
+      - name: Configure (arm64)
+        run: |
+          cmake -B build-arm64 -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DQt6_DIR="${Qt6_DIR}" \
+            -DCMAKE_PREFIX_PATH="${OBS_PREFIX}"
+
+      - name: Configure (x86_64)
+        run: |
+          cmake -B build-x86 -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+            -DQt6_DIR="${Qt6_DIR}" \
+            -DCMAKE_PREFIX_PATH="${OBS_PREFIX}"
+
+      - name: Build both arches
+        run: |
+          cmake --build build-arm64 --parallel
+          cmake --build build-x86  --parallel
+
+      - name: Lipo universal binary
+        run: |
+          cmake --install build-arm64 --prefix dist-arm64
+          cmake --install build-x86   --prefix dist-x86
+          mkdir -p dist-universal/lib/obs-plugins
+          lipo -create \
+            dist-arm64/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so \
+            dist-x86/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so \
+            -output dist-universal/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so
+          cp -r dist-arm64/data dist-universal/data || true
+
+      - name: Package
+        run: tar -czf ${{ env.PLUGIN_NAME }}-macos-universal.tar.gz -C dist-universal .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PLUGIN_NAME }}-macos-universal
+          path: ${{ env.PLUGIN_NAME }}-macos-universal.tar.gz
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # WINDOWS — no package manager ships libobs dev headers, so we build OBS
+  # from source (just the libobs target, no UI/plugins). Heavy first run,
+  # then fully cached by OBS version + runner OS.
+  # ───────────────────────────────────────────────────────────────────────────
   build-windows:
     name: Windows (x64)
     runs-on: windows-2022
@@ -45,31 +155,64 @@ jobs:
           arch: win64_msvc2019_64
           cache: true
 
-      - name: Fetch OBS headers + libs
-        run: |
-          $obsUrl = "https://github.com/obsproject/obs-studio/releases/download/$env:OBS_VERSION/OBS-Studio-$env:OBS_VERSION-Windows-x64.zip"
-          Invoke-WebRequest -Uri $obsUrl -OutFile obs.zip
-          Expand-Archive -Path obs.zip -DestinationPath obs-studio
-          # Also grab the dev headers (cmake package)
-          $devUrl = "https://github.com/obsproject/obs-studio/releases/download/$env:OBS_VERSION/libobs-dev-$env:OBS_VERSION-windows-x64.zip"
-          Invoke-WebRequest -Uri $devUrl -OutFile obs-dev.zip -ErrorAction SilentlyContinue
-          if (Test-Path obs-dev.zip) { Expand-Archive -Path obs-dev.zip -DestinationPath obs-dev }
+      # ── OBS source (headers + cmake config) ──────────────────────────────
+      - name: Cache OBS build
+        id: cache-obs
+        uses: actions/cache@v4
+        with:
+          path: obs-install
+          key: obs-${{ env.OBS_VERSION }}-win-x64-v1
 
-      - name: Configure CMake
+      - name: Clone OBS source
+        if: steps.cache-obs.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch $env:OBS_VERSION `
+            https://github.com/obsproject/obs-studio.git obs-source
+
+      - name: Install OBS build deps (vcpkg)
+        if: steps.cache-obs.outputs.cache-hit != 'true'
+        run: |
+          # vcpkg is pre-installed on windows-2022 runners at C:\vcpkg
+          vcpkg install `
+            ffmpeg:x64-windows `
+            zlib:x64-windows `
+            --triplet x64-windows
+          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
+
+      - name: Build libobs from source
+        if: steps.cache-obs.outputs.cache-hit != 'true'
+        run: |
+          cmake -B obs-build -S obs-source `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DENABLE_PLUGINS=OFF `
+            -DENABLE_UI=OFF `
+            -DENABLE_SCRIPTING=OFF `
+            -DENABLE_BROWSER=OFF `
+            -DENABLE_WEBSOCKET=OFF `
+            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/obs-install"
+
+          cmake --build obs-build --config Release --target libobs --parallel
+          cmake --install obs-build --config Release --component Development
+
+      # ── Plugin build ──────────────────────────────────────────────────────
+      - name: Configure plugin
         run: |
           cmake -B build -S . `
             -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
             -DQt6_DIR="$env:Qt6_DIR/lib/cmake/Qt6" `
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-dev"
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install"
 
-      - name: Build
+      - name: Build plugin
         run: cmake --build build --config RelWithDebInfo --parallel
 
       - name: Package
         run: |
-          cmake --install build --prefix "${{ github.workspace }}/dist" --config RelWithDebInfo
-          Compress-Archive -Path "${{ github.workspace }}/dist/*" `
+          cmake --install build --prefix dist --config RelWithDebInfo
+          Compress-Archive -Path dist\* `
             -DestinationPath "${{ env.PLUGIN_NAME }}-windows-x64.zip"
 
       - name: Upload artifact
@@ -79,142 +222,12 @@ jobs:
           path: ${{ env.PLUGIN_NAME }}-windows-x64.zip
           retention-days: 14
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # MACOS BUILD (universal: x86_64 + arm64)
-  # ─────────────────────────────────────────────────────────────────────────────
-  build-macos:
-    name: macOS (universal)
-    runs-on: macos-14   # Apple Silicon runner; cross-compiles x86_64 too
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install dependencies
-        run: |
-          brew install cmake ninja qt@6
-          echo "Qt6_DIR=$(brew --prefix qt@6)/lib/cmake/Qt6" >> $GITHUB_ENV
-
-      - name: Install OBS dev package
-        run: |
-          brew install --cask obs
-          # OBS installs its framework to /Applications/OBS.app
-          echo "OBS_FRAMEWORK=/Applications/OBS.app/Contents/Frameworks" >> $GITHUB_ENV
-
-      - name: Configure CMake (arm64)
-        run: |
-          cmake -B build-arm64 -S . \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            -DQt6_DIR="${{ env.Qt6_DIR }}" \
-            -DOBS_FRAMEWORK_PATH="${{ env.OBS_FRAMEWORK_PATH }}"
-
-      - name: Configure CMake (x86_64)
-        run: |
-          cmake -B build-x86 -S . \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
-            -DQt6_DIR="${{ env.Qt6_DIR }}" \
-            -DOBS_FRAMEWORK_PATH="${{ env.OBS_FRAMEWORK_PATH }}"
-
-      - name: Build both arches
-        run: |
-          cmake --build build-arm64 --parallel
-          cmake --build build-x86  --parallel
-
-      - name: Lipo into universal binary
-        run: |
-          cmake --install build-arm64 --prefix dist-arm64
-          cmake --install build-x86   --prefix dist-x86
-          mkdir -p dist-universal/lib/obs-plugins
-          lipo -create \
-            dist-arm64/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so \
-            dist-x86/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so \
-            -output dist-universal/lib/obs-plugins/${{ env.PLUGIN_NAME }}.so
-          cp -r dist-arm64/data dist-universal/data
-
-      - name: Package
-        run: |
-          tar -czf ${{ env.PLUGIN_NAME }}-macos-universal.tar.gz \
-            -C dist-universal .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.PLUGIN_NAME }}-macos-universal
-          path: ${{ env.PLUGIN_NAME }}-macos-universal.tar.gz
-          retention-days: 14
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # LINUX BUILD (x86_64, Ubuntu 22.04 — matches OBS Flatpak base)
-  # ─────────────────────────────────────────────────────────────────────────────
-  build-linux:
-    name: Linux (x86_64)
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake ninja-build pkg-config \
-            qt6-base-dev libqt6widgets6 \
-            libasound2-dev \
-            libobs-dev || true
-          # libobs-dev may not be in apt; fall back to building headers only
-          if ! dpkg -s libobs-dev &>/dev/null; then
-            echo "NEED_OBS_HEADERS=true" >> $GITHUB_ENV
-          fi
-
-      - name: Fetch OBS headers (if not in apt)
-        if: env.NEED_OBS_HEADERS == 'true'
-        run: |
-          wget -q https://github.com/obsproject/obs-studio/archive/refs/tags/${{ env.OBS_VERSION }}.tar.gz
-          tar -xzf ${{ env.OBS_VERSION }}.tar.gz
-          # Install just the headers we need
-          sudo mkdir -p /usr/include/obs
-          sudo cp -r obs-studio-${{ env.OBS_VERSION }}/libobs/*.h /usr/include/obs/
-          echo "OBS_INCLUDE_DIR=/usr/include" >> $GITHUB_ENV
-
-      - name: Configure CMake
-        run: |
-          cmake -B build -S . \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DOBS_INCLUDE_DIR="${{ env.OBS_INCLUDE_DIR || '/usr/include' }}"
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Package
-        run: |
-          cmake --install build --prefix dist
-          tar -czf ${{ env.PLUGIN_NAME }}-linux-x86_64.tar.gz -C dist .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.PLUGIN_NAME }}-linux-x86_64
-          path: ${{ env.PLUGIN_NAME }}-linux-x86_64.tar.gz
-          retention-days: 14
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # RELEASE — runs only on version tags (v1.2.3), needs all builds to pass
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # RELEASE — tag-triggered, waits for all three builds
+  # ───────────────────────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [build-windows, build-macos, build-linux]
+    needs: [build-linux, build-macos, build-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -226,7 +239,7 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create release with all binaries
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
