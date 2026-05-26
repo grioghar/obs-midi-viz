@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Project metadata (bump version here → flows through to plugin + CI release)
-# ─────────────────────────────────────────────────────────────────────────────
 project(obs-midi-viz
   VERSION 0.1.0
   DESCRIPTION "MIDI visualizer plugin for OBS Studio"
@@ -12,31 +9,23 @@ project(obs-midi-viz
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-# Export compile_commands.json for clangd / IDE tooling
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CMake module path — our custom finders live in cmake/
-# ─────────────────────────────────────────────────────────────────────────────
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Platform-specific OBS discovery
-# On Windows + macOS, OBS ships CMake config packages.
-# On Linux, libobs-dev provides pkg-config; we also support header-only builds.
+# OBS discovery — three-stage fallback
 # ─────────────────────────────────────────────────────────────────────────────
 if(APPLE)
-  # OBS.app bundles its framework — look there first
   set(OBS_FRAMEWORK_PATH "/Applications/OBS.app/Contents/Frameworks"
     CACHE PATH "Path to OBS.app Frameworks directory")
   list(APPEND CMAKE_PREFIX_PATH "${OBS_FRAMEWORK_PATH}")
 endif()
 
-# 1st try: CMake config package (works on Windows + macOS after OBS install)
+# 1st: CMake config package (Windows / macOS after OBS install)
 find_package(libobs QUIET)
 
-# 2nd try: pkg-config (reliable on Linux with libobs-dev from OBS PPA)
+# 2nd: pkg-config (Linux with libobs-dev from OBS PPA)
 if(NOT libobs_FOUND)
   find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
@@ -44,53 +33,43 @@ if(NOT libobs_FOUND)
     if(LIBOBS_FOUND)
       message(STATUS "Found libobs via pkg-config: ${LIBOBS_VERSION}")
       add_library(OBS::libobs INTERFACE IMPORTED)
-
-      # pkg-config omits standard system prefixes (e.g. /usr/include) from
-      # INCLUDE_DIRS, but OBS headers live in the *subdirectory* /usr/include/obs/
-      # so we must locate obs-module.h explicitly with PATH_SUFFIXES.
+      # OBS installs headers to /usr/include/obs/ — find_path with
+      # PATH_SUFFIXES locates obs-module.h inside that subdirectory
       find_path(OBS_INCLUDE_DIR obs-module.h
         HINTS ${LIBOBS_INCLUDE_DIRS} /usr/include /usr/local/include
         PATH_SUFFIXES obs
         NO_DEFAULT_PATH
       )
-      # Fallback: let the compiler search default paths (catches edge cases)
       if(NOT OBS_INCLUDE_DIR)
         find_path(OBS_INCLUDE_DIR obs-module.h PATH_SUFFIXES obs)
       endif()
-
       if(OBS_INCLUDE_DIR)
         message(STATUS "OBS headers: ${OBS_INCLUDE_DIR}")
         target_include_directories(OBS::libobs INTERFACE "${OBS_INCLUDE_DIR}")
       else()
         message(WARNING "libobs found via pkg-config but obs-module.h not located")
       endif()
-
       target_link_libraries(OBS::libobs INTERFACE ${LIBOBS_LINK_LIBRARIES})
       set(libobs_FOUND TRUE)
     endif()
   endif()
 endif()
 
-# 3rd try: header-only stub (lets the build prove compilation even without
-# a linked libobs — useful for local dev without OBS installed)
+# 3rd: header-only stub (local dev without OBS installed)
 if(NOT libobs_FOUND)
-  message(STATUS "libobs not found via CMake or pkg-config — using header-only stub")
-  message(STATUS "  Set OBS_INCLUDE_DIR to your OBS headers if you have them locally")
-  set(OBS_INCLUDE_DIR "" CACHE PATH "Path to libobs headers (fallback)")
+  message(STATUS "libobs not found — using header-only stub (set OBS_INCLUDE_DIR manually)")
+  set(OBS_INCLUDE_DIR "" CACHE PATH "Path to libobs headers")
   add_library(OBS::libobs INTERFACE IMPORTED)
   target_include_directories(OBS::libobs INTERFACE "${OBS_INCLUDE_DIR}")
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Qt6 — required for Properties panels
+# Qt6
 # ─────────────────────────────────────────────────────────────────────────────
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
-set_target_properties(Qt6::Core Qt6::Widgets PROPERTIES
-  INTERFACE_COMPILE_FEATURES "cxx_std_17")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RtMidi — cross-platform MIDI I/O (WinMM / CoreMIDI / ALSA)
-# Pulled at configure time via FetchContent; no submodule needed.
+# RtMidi via FetchContent
 # ─────────────────────────────────────────────────────────────────────────────
 include(FetchContent)
 FetchContent_Declare(
@@ -100,15 +79,21 @@ FetchContent_Declare(
   GIT_SHALLOW    TRUE
 )
 set(RTMIDI_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS    OFF CACHE BOOL "" FORCE)  # link statically
+set(BUILD_SHARED_LIBS    OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(rtmidi)
+
+# Force -fPIC on the rtmidi target directly — setting CMAKE_POSITION_INDEPENDENT_CODE
+# in parent scope does not reliably propagate into FetchContent subprojects
+set_target_properties(rtmidi PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Plugin target
+# NOTE: plugin-support.c is intentionally excluded — OBS_DECLARE_MODULE() and
+# OBS_MODULE_USE_DEFAULT_LOCALE() are already in plugin-main.cpp; having them
+# in a second translation unit causes multiple-definition linker errors.
 # ─────────────────────────────────────────────────────────────────────────────
 set(PLUGIN_SOURCES
   src/plugin-main.cpp
-  src/plugin-support.c
   src/midi-engine.cpp
   src/sources/piano-source.cpp
   src/sources/drum-source.cpp
@@ -128,7 +113,6 @@ target_link_libraries(obs-midi-viz PRIVATE
   rtmidi
 )
 
-# Platform-specific MIDI backend linkage (RtMidi needs these)
 if(WIN32)
   target_link_libraries(obs-midi-viz PRIVATE winmm)
 elseif(APPLE)
@@ -141,23 +125,20 @@ else()
   target_link_libraries(obs-midi-viz PRIVATE asound pthread)
 endif()
 
-# Tell OBS the plugin API version we were built against
 target_compile_definitions(obs-midi-viz PRIVATE
   PLUGIN_NAME="obs-midi-viz"
   PLUGIN_VERSION="${PROJECT_VERSION}"
 )
 
-# macOS: plugin output suffix is .plugin; other platforms .so / .dll
 if(APPLE)
   set_target_properties(obs-midi-viz PROPERTIES
     BUNDLE TRUE
     BUNDLE_EXTENSION plugin
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MacOSXBundleInfo.plist.in"
   )
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Install rules (cmake --install → consumed by CI packaging step)
+# Install
 # ─────────────────────────────────────────────────────────────────────────────
 include(GNUInstallDirs)
 
