@@ -92,7 +92,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: obs-install
-          key: obs-${{ env.OBS_VERSION }}-macos-arm64-v2
+          key: obs-${{ env.OBS_VERSION }}-macos-arm64-v3
 
       - name: Clone OBS source
         if: steps.cache-obs.outputs.cache-hit != 'true'
@@ -132,21 +132,25 @@ jobs:
           mkdir -p "${OBS_ROOT}/include/obs"
           cp -R obs-source/libobs/. "${OBS_ROOT}/include/obs/"
 
-          CFG_DIR="${OBS_ROOT}/Frameworks/libobs.framework/Resources/cmake"
+          # cmake PREFIX_PATH searches <prefix>/lib/cmake/<name>/ universally.
+          # The framework-bundle path (<prefix>/<name>.framework/Resources/cmake/)
+          # is only searched when the prefix IS the Frameworks directory itself.
+          # Use lib/cmake/libobs/ so find_package(libobs) works with obs-install as prefix.
+          CFG_DIR="${OBS_ROOT}/lib/cmake/libobs"
           mkdir -p "${CFG_DIR}"
           cat > "${CFG_DIR}/libobsConfig.cmake" << 'CMAKEEOF'
-          if(NOT TARGET OBS::libobs)
-            get_filename_component(_obs_root "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
-            add_library(OBS::libobs INTERFACE IMPORTED)
-            target_include_directories(OBS::libobs INTERFACE "${_obs_root}/include/obs")
-            target_link_libraries(OBS::libobs INTERFACE
-              "-F${_obs_root}/Frameworks" "-framework libobs")
-          endif()
-          set(libobs_FOUND TRUE)
-          CMAKEEOF
+if(NOT TARGET OBS::libobs)
+  get_filename_component(_obs_root "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+  add_library(OBS::libobs INTERFACE IMPORTED)
+  target_include_directories(OBS::libobs INTERFACE "${_obs_root}/include/obs")
+  target_link_libraries(OBS::libobs INTERFACE
+    "-F${_obs_root}/Frameworks" "-framework libobs")
+endif()
+set(libobs_FOUND TRUE)
+CMAKEEOF
 
           echo "=== obs-install layout ==="
-          find "${OBS_ROOT}" -maxdepth 5 -not -path "*/Headers/*" -not -path "*/obs-install/include/*" | sort | head -40
+          find "${OBS_ROOT}" -maxdepth 4 | sort | head -40
 
       # ── Plugin build ────────────────────────────────────────────────────
       - name: Configure plugin
