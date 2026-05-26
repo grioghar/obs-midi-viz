@@ -92,7 +92,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: obs-install
-          key: obs-${{ env.OBS_VERSION }}-macos-arm64-v1
+          key: obs-${{ env.OBS_VERSION }}-macos-arm64-v2
 
       - name: Clone OBS source
         if: steps.cache-obs.outputs.cache-hit != 'true'
@@ -116,25 +116,39 @@ jobs:
             -DENABLE_WEBSOCKET=OFF \
             -DENABLE_AJA=OFF \
             -DENABLE_DECKLINK=OFF \
-            -DCMAKE_PREFIX_PATH="${{ env.FFMPEG_PREFIX }}" \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/obs-install"
+            -DCMAKE_PREFIX_PATH="${{ env.FFMPEG_PREFIX }}"
 
           cmake --build obs-build --target libobs --config Release --parallel
-          cmake --install obs-build --config Release
+
+          # cmake --install is a no-op with the Xcode generator for partial builds.
+          # Manually assemble the layout that find_package(libobs) expects:
+          #   obs-install/Frameworks/libobs.framework   <- framework binary
+          #   obs-install/include/obs/**                <- all headers
+          #   obs-install/Frameworks/libobs.framework/Resources/cmake/libobsConfig.cmake
+          OBS_ROOT="${{ github.workspace }}/obs-install"
+          mkdir -p "${OBS_ROOT}/Frameworks"
+          cp -R obs-build/libobs/Release/libobs.framework "${OBS_ROOT}/Frameworks/"
+
+          mkdir -p "${OBS_ROOT}/include/obs"
+          cp -R obs-source/libobs/. "${OBS_ROOT}/include/obs/"
+
+          CFG_DIR="${OBS_ROOT}/Frameworks/libobs.framework/Resources/cmake"
+          mkdir -p "${CFG_DIR}"
+          cat > "${CFG_DIR}/libobsConfig.cmake" << 'CMAKEEOF'
+          if(NOT TARGET OBS::libobs)
+            get_filename_component(_obs_root "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
+            add_library(OBS::libobs INTERFACE IMPORTED)
+            target_include_directories(OBS::libobs INTERFACE "${_obs_root}/include/obs")
+            target_link_libraries(OBS::libobs INTERFACE
+              "-F${_obs_root}/Frameworks" "-framework libobs")
+          endif()
+          set(libobs_FOUND TRUE)
+          CMAKEEOF
+
+          echo "=== obs-install layout ==="
+          find "${OBS_ROOT}" -maxdepth 5 -not -path "*/Headers/*" -not -path "*/obs-install/include/*" | sort | head -40
 
       # ── Plugin build ────────────────────────────────────────────────────
-      - name: Locate libobs cmake config
-        run: |
-          cfg=$(find obs-install -name "libobsConfig.cmake" 2>/dev/null | head -1)
-          if [ -z "$cfg" ]; then
-            echo "=== all cmake files in obs-install ==="
-            find obs-install -name "*.cmake" | sort
-            echo "ERROR: libobsConfig.cmake not found in obs-install"
-            exit 1
-          fi
-          echo "LIBOBS_CMAKE_DIR=$(dirname $cfg)" >> "$GITHUB_ENV"
-          echo "Found: $cfg"
-
       - name: Configure plugin
         run: |
           cmake -B build -S . -G Ninja \
@@ -143,8 +157,7 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
             -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path) \
             -DQt6_DIR="${{ env.Qt6_DIR }}" \
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install" \
-            -Dlibobs_DIR="${{ env.LIBOBS_CMAKE_DIR }}"
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install"
 
       - name: Build plugin
         run: cmake --build build --parallel
