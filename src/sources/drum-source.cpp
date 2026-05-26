@@ -6,22 +6,41 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Default GM drum note → pad label mapping (General MIDI percussion map)
-// Index = MIDI note number (35–81 covers standard GM kit)
+// Full 128-entry array — nullptrs for notes outside the GM drum range.
+// (Designated initializers with non-zero indices are a GNU C extension
+//  not supported in C++ mode on GCC 11, so we pad explicitly instead.)
 // ─────────────────────────────────────────────────────────────────────────────
 static const char *GM_DRUM_NAMES[128] = {
-    // 0–34 unused in GM
-    [35] = "Bass2",  [36] = "Bass1",  [37] = "Rimshot", [38] = "Snare",
-    [39] = "Clap",   [40] = "Snare2", [41] = "Tom1",    [42] = "HH-C",
-    [43] = "Tom2",   [44] = "HH-P",   [45] = "Tom3",    [46] = "HH-O",
-    [47] = "Tom4",   [48] = "Tom5",   [49] = "Crash1",  [50] = "Tom6",
-    [51] = "Ride1",  [52] = "China",  [53] = "RideBell",[54] = "Tamb",
-    [55] = "Splash", [56] = "Cowbell",[57] = "Crash2",  [58] = "Vibraslap",
-    [59] = "Ride2",  [60] = "HiBongo",[61] = "LoBongo", [62] = "Conga1",
-    [63] = "Conga2", [64] = "Conga3", [65] = "HiTimb",  [66] = "LoTimb",
-    [67] = "HiAgogo",[68] = "LoAgogo",[69] = "Cabasa",  [70] = "Maracas",
-    [71] = "SWhistle",[72]= "LWhistle",[73]= "ShortGui", [74]= "LongGui",
-    [75] = "Claves", [76] = "HiWood", [77] = "LoWood",  [78] = "MuteTriangle",
-    [79] = "OpenTri",[80] = "MuteHH", [81] = "OpenHH",
+    // 0–34: not used in GM percussion
+    nullptr,nullptr,nullptr,nullptr,nullptr, // 0–4
+    nullptr,nullptr,nullptr,nullptr,nullptr, // 5–9
+    nullptr,nullptr,nullptr,nullptr,nullptr, // 10–14
+    nullptr,nullptr,nullptr,nullptr,nullptr, // 15–19
+    nullptr,nullptr,nullptr,nullptr,nullptr, // 20–24
+    nullptr,nullptr,nullptr,nullptr,nullptr, // 25–29
+    nullptr,nullptr,nullptr,nullptr,nullptr, // 30–34
+    // 35–81: standard GM drum map
+    "Bass2",    "Bass1",    "Rimshot",   "Snare",      // 35–38
+    "Clap",     "Snare2",   "Tom1",      "HH-C",       // 39–42
+    "Tom2",     "HH-P",     "Tom3",      "HH-O",       // 43–46
+    "Tom4",     "Tom5",     "Crash1",    "Tom6",        // 47–50
+    "Ride1",    "China",    "RideBell",  "Tamb",        // 51–54
+    "Splash",   "Cowbell",  "Crash2",    "Vibraslap",   // 55–58
+    "Ride2",    "HiBongo",  "LoBongo",   "Conga1",      // 59–62
+    "Conga2",   "Conga3",   "HiTimb",    "LoTimb",      // 63–66
+    "HiAgogo",  "LoAgogo",  "Cabasa",    "Maracas",     // 67–70
+    "SWhistle", "LWhistle", "ShortGui",  "LongGui",     // 71–74
+    "Claves",   "HiWood",   "LoWood",    "MuteTri",     // 75–78
+    "OpenTri",  "MuteHH",   "OpenHH",                   // 79–81
+    // 82–127: undefined / manufacturer-specific
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,    // 82–87
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,    // 88–93
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,    // 94–99
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,    // 100–105
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,    // 106–111
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,    // 112–117
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,    // 118–123
+    nullptr,nullptr,nullptr,nullptr,                    // 124–127
 };
 
 struct DrumSource {
