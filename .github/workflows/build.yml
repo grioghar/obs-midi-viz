@@ -230,6 +230,7 @@ jobs:
             ffmpeg:x64-windows `
             zlib:x64-windows `
             curl:x64-windows `
+            jansson:x64-windows `
             --triplet x64-windows
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
 
