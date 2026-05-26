@@ -44,7 +44,27 @@ if(NOT libobs_FOUND)
     if(LIBOBS_FOUND)
       message(STATUS "Found libobs via pkg-config: ${LIBOBS_VERSION}")
       add_library(OBS::libobs INTERFACE IMPORTED)
-      target_include_directories(OBS::libobs INTERFACE ${LIBOBS_INCLUDE_DIRS})
+
+      # pkg-config omits standard system prefixes (e.g. /usr/include) from
+      # INCLUDE_DIRS, but OBS headers live in the *subdirectory* /usr/include/obs/
+      # so we must locate obs-module.h explicitly with PATH_SUFFIXES.
+      find_path(OBS_INCLUDE_DIR obs-module.h
+        HINTS ${LIBOBS_INCLUDE_DIRS} /usr/include /usr/local/include
+        PATH_SUFFIXES obs
+        NO_DEFAULT_PATH
+      )
+      # Fallback: let the compiler search default paths (catches edge cases)
+      if(NOT OBS_INCLUDE_DIR)
+        find_path(OBS_INCLUDE_DIR obs-module.h PATH_SUFFIXES obs)
+      endif()
+
+      if(OBS_INCLUDE_DIR)
+        message(STATUS "OBS headers: ${OBS_INCLUDE_DIR}")
+        target_include_directories(OBS::libobs INTERFACE "${OBS_INCLUDE_DIR}")
+      else()
+        message(WARNING "libobs found via pkg-config but obs-module.h not located")
+      endif()
+
       target_link_libraries(OBS::libobs INTERFACE ${LIBOBS_LINK_LIBRARIES})
       set(libobs_FOUND TRUE)
     endif()
