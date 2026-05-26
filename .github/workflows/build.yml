@@ -123,6 +123,18 @@ jobs:
           cmake --install obs-build --config Release
 
       # ── Plugin build ────────────────────────────────────────────────────
+      - name: Locate libobs cmake config
+        run: |
+          cfg=$(find obs-install -name "libobsConfig.cmake" 2>/dev/null | head -1)
+          if [ -z "$cfg" ]; then
+            echo "=== all cmake files in obs-install ==="
+            find obs-install -name "*.cmake" | sort
+            echo "ERROR: libobsConfig.cmake not found in obs-install"
+            exit 1
+          fi
+          echo "LIBOBS_CMAKE_DIR=$(dirname $cfg)" >> "$GITHUB_ENV"
+          echo "Found: $cfg"
+
       - name: Configure plugin
         run: |
           cmake -B build -S . -G Ninja \
@@ -132,7 +144,7 @@ jobs:
             -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path) \
             -DQt6_DIR="${{ env.Qt6_DIR }}" \
             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install" \
-            -Dlibobs_DIR="${{ github.workspace }}/obs-install/Frameworks/libobs.framework/Resources/cmake"
+            -Dlibobs_DIR="${{ env.LIBOBS_CMAKE_DIR }}"
 
       - name: Build plugin
         run: cmake --build build --parallel
