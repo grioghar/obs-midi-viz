@@ -108,6 +108,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path) \
             -DENABLE_PLUGINS=OFF \
             -DENABLE_UI=OFF \
             -DENABLE_SCRIPTING=OFF \
