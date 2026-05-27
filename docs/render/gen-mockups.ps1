@@ -287,5 +287,128 @@ Write-DrumSvg "$OutDir\drum-maschine.svg" 480 480 4 4 '#080808' '#141414' '#FF33
     @(0,3,7,10) `
     @{1=0.65; 5=0.25; 9=0.15; 14=0.10; 2=0.08}
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. STEP-SEQUENCER helper
+# ─────────────────────────────────────────────────────────────────────────────
+# rowLabels : string array, one entry per instrument row
+# cPanel    : '#RRGGBB' panel / canvas background
+# cIdle     : '#RRGGBB' unlit step cell
+# cHit      : '#RRGGBB' triggered step cell (full flash)
+# flashMap  : hashtable keyed "row,col" → 0.0–1.0 flash value
+# curCol    : integer 0-15, the currently-active step column
+function Write-StepSeqSvg($file, $W, $H, $rowLabels, $cPanel, $cIdle, $cHit, $flashMap, $curCol) {
+    $numRows = $rowLabels.Count
+    $numCols = 16
+    $labelW  = [double]($W * 0.15)
+    $gridW   = [double]($W - $labelW)
+    $colW    = $gridW / $numCols
+    $rowH    = [double]$H / $numRows
+    $gap     = [Math]::Max(1.5, [Math]::Min($colW, $rowH) * 0.05)
+
+    # Derived colours
+    $hlColor      = lerpHex $cPanel $cIdle 0.55          # current-column band
+    $sepColor     = lerpHex $cPanel '#888888' 0.32        # 4-step group separators
+    $stripSepCol  = lerpHex $cPanel '#666666' 0.38        # label/grid boundary
+    $labelColor   = '#AAAAAA'
+
+    # Font size: target fitting 3 chars in the label strip at a readable size
+    $fsW      = ($labelW - 8.0) / 11.0          # 3 chars = 11 px-cols at scale 1
+    $fsH      = $rowH * 0.55
+    $fontSize = [Math]::Max(9, [Math]::Min([int]$fsW, [int]$fsH))
+
+    $sb = [System.Text.StringBuilder]::new()
+    $null = $sb.AppendLine("<?xml version='1.0' encoding='UTF-8'?>")
+    $null = $sb.AppendLine("<svg width='$W' height='$H' viewBox='0 0 $W $H' xmlns='http://www.w3.org/2000/svg'>")
+
+    # Panel
+    $null = $sb.AppendLine("<rect width='$W' height='$H' fill='$cPanel'/>")
+
+    # Current-column highlight band
+    $hx = fmt($labelW + [double]$curCol * $colW)
+    $hw = fmt($colW)
+    $null = $sb.AppendLine("<rect x='$hx' y='0' width='$hw' height='$H' fill='$hlColor'/>")
+
+    # Group separators every 4 steps (1 bar)
+    for ($g = 4; $g -lt $numCols; $g += 4) {
+        $sx = fmt($labelW + [double]$g * $colW - 1.0)
+        $null = $sb.AppendLine("<rect x='$sx' y='0' width='2' height='$H' fill='$sepColor'/>")
+    }
+
+    # Label-strip right-edge separator
+    $lsx = fmt($labelW - 1.0)
+    $null = $sb.AppendLine("<rect x='$lsx' y='0' width='2' height='$H' fill='$stripSepCol'/>")
+
+    # Rows
+    for ($r = 0; $r -lt $numRows; $r++) {
+        $rowY = [double]$r * $rowH
+
+        # Row label — centred in the strip
+        $lbl = $rowLabels[$r]
+        $lx  = fmt($labelW * 0.5)
+        $ly  = fmt($rowY + $rowH * 0.5 + $fontSize * 0.38)
+        $null = $sb.AppendLine("<text x='$lx' y='$ly' fill='$labelColor' font-family='Courier New,monospace' font-weight='bold' font-size='${fontSize}px' text-anchor='middle'>$lbl</text>")
+
+        # Step cells
+        for ($c = 0; $c -lt $numCols; $c++) {
+            $key   = "$r,$c"
+            $flash = if ($flashMap.ContainsKey($key)) { $flashMap[$key] } else { 0.0 }
+
+            $cellX = fmt($labelW + [double]$c * $colW + $gap)
+            $cellY = fmt($rowY + $gap)
+            $cellW = fmt($colW - $gap * 2.0)
+            $cellH = fmt($rowH - $gap * 2.0)
+            $col   = lerpHex $cIdle $cHit $flash
+
+            $null = $sb.AppendLine("<rect x='$cellX' y='$cellY' width='$cellW' height='$cellH' fill='$col' rx='1'/>")
+
+            # Subtle highlight overlay on hot cells
+            if ($flash -gt 0.55) {
+                $null = $sb.AppendLine("<rect x='$cellX' y='$cellY' width='$cellW' height='$cellH' fill='rgba(255,255,255,0.10)' rx='1'/>")
+            }
+        }
+    }
+
+    $null = $sb.AppendLine("</svg>")
+    $sb.ToString() | Set-Content $file -Encoding UTF8
+    Write-Host "$(Split-Path $file -Leaf) done"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. TR-808 step-sequencer   640 × 320
+#    Classic boom-bap pattern; current step = col 8 (beat 3, 9th 16th-note)
+#    BD: 0,4,8,12  SD: 4,12  CP: 8  CH: 0,2,4,6,8  OH: 7  LT: 2  MT: 6
+# ─────────────────────────────────────────────────────────────────────────────
+Write-StepSeqSvg "$OutDir\seq-808.svg" 640 320 `
+    @('BD','SD','CP','CH','OH','LT','MT','HT') '#1C1208' '#2E1E08' '#FF8800' `
+    @{
+        # -- Steps 0-7 played, fading --
+        '0,0'=0.20; '3,0'=0.14;           # col 0: BD + CH (most decayed)
+        '3,2'=0.22; '5,2'=0.28;           # col 2: CH + LT
+        '0,4'=0.42; '1,4'=0.42; '3,4'=0.35; # col 4: BD + SD + CH
+        '3,6'=0.65; '6,6'=0.62;           # col 6: CH + MT
+        '4,7'=0.60;                        # col 7: OH
+        # -- Col 8: current step (just fired) --
+        '0,8'=1.0; '2,8'=1.0; '3,8'=1.0  # BD + CP + CH fully lit
+    } 8
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. TB-303 step-sequencer (bassline, chromatic)   640 × 480
+#    A-minor acid figure; current step = col 8 (G firing)
+#    Pattern: A(col0) C(2) D(3) E(4) G(5) A(6) C(7) G(8) ...
+# ─────────────────────────────────────────────────────────────────────────────
+Write-StepSeqSvg "$OutDir\seq-tb303.svg" 640 480 `
+    @('C','C#','D','D#','E','F','F#','G','G#','A','A#','B') '#061A0A' '#0D2E14' '#00FF66' `
+    @{
+        '9,0'=0.22;   # A at col 0 (most faded)
+        '0,2'=0.40;   # C
+        '2,3'=0.38;   # D
+        '4,4'=0.55;   # E
+        '7,5'=0.62;   # G
+        '9,6'=0.72;   # A
+        '0,7'=0.82;   # C (most recent before current)
+        '7,8'=1.0     # G at col 8 — current, fully lit
+    } 8
+
 Write-Host "All mockup SVGs written to $OutDir"
 

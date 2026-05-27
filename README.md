@@ -50,6 +50,18 @@ All three sources are independent — add, resize, reorder, and show/hide them p
 
 *8 CC lanes (Mod, Breath, Expr, Sustain, Vol, Pan, Filter, Reso) at current values. Sustain (100%) glows cyan; low values render in standard blue.*
 
+### Drums (MIDI) — Roland TR-808 step-sequencer view
+
+![TR-808 step sequencer](docs/images/seq-808.svg)
+
+*Instruments as rows (BD / SD / CP / CH / OH / LT / MT / HT), 16 time steps as columns. The highlighted column (step 9) just fired BD + CP + CH simultaneously. Steps 1–8 show decayed orange traces; steps 10–16 are dark (not yet played this bar). Thin lines separate the four 4-step groups.*
+
+### Drums (MIDI) — Roland TB-303 bassline step-sequencer view
+
+![TB-303 bassline step sequencer](docs/images/seq-tb303.svg)
+
+*12-row chromatic pitch-class display (C through B). Any octave of a note fires the same row — here an A-minor acid figure has built up a scrolling green pattern. Step 9 fired a G (row 7 fully lit); earlier steps show the A → C → D → E → G → A → C ascent fading to the left. Steps 10–16 are idle.*
+
 ---
 
 ## Installation
