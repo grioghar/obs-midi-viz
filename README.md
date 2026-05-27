@@ -1,6 +1,6 @@
 # obs-midi-viz
 
-> Real-time MIDI visualizer plugin for OBS Studio — piano roll, drum pads, and CC lanes as independent, composable OBS sources.
+> Real-time MIDI visualizer plugin for OBS Studio — piano roll, drum pads, CC lanes, DJ controller skins, and synthesizer patch displays as independent, composable OBS sources.
 
 [![Build](https://github.com/grioghar/obs-midi-viz/actions/workflows/build.yml/badge.svg)](https://github.com/grioghar/obs-midi-viz/actions/workflows/build.yml)
 
@@ -14,6 +14,7 @@
 | **Drums (MIDI)** | Pad grid (any size up to 8×8) with velocity-scaled flash decay; 25 device presets (TR-808, MPC 3000, Maschine, Launchpad, and more); three pad styles (Square, Rounded, Circle); GM drum name labels drawn with a GPU-side 3×5 bitmap font |
 | **CC Lanes (MIDI)** | Per-CC vertical bars with configurable smoothing for mod wheel, expression, sustain, filter, and any other CC number |
 | **DJ Controller (MIDI)** | Two-deck Pioneer DDJ-FLX4 (and compatible AlphaTheta controllers) top-down schematic with live-animated jog wheels, 27-dot LED-arc rotary knobs (EQ Hi/Mid/Lo, Trim, Filter), vertical channel faders, horizontal crossfader, transport buttons (Play/Cue/Sync/Loop), and 4 hot-cue pads per deck; every control driven directly from MIDI CC and Note data in real time |
+| **Synth Patch Display (MIDI)** | Full synth parameter panel populated live from MIDI SysEx patch dumps; panels for Behringer DeepMind 12, Korg DSS-1, Alesis QS7.1, and Yamaha PSR-540; sections for VCOs/DCOs, filter, envelopes (ADSR visualizer), LFOs, and FX; real-time CC updates for filter cutoff/resonance; multiple independent instances supported |
 
 All sources are independent — add, resize, reorder, and show/hide them per scene.
 
@@ -69,6 +70,12 @@ All sources are independent — add, resize, reorder, and show/hide them per sce
 
 *Deck 1 (left) is playing — green ring glows around the spinning jog wheel, PLAY and SYNC are lit orange and green. EQ High is boosted (arc lights above centre), Low is rolled off (arc lights below centre), Hot Cue 1 just fired (red pad flash). Deck 2 (right) is cued and ready with neutral EQ; crossfader sits 38 % toward Deck 1. Every knob, fader, button, and pad updates live from MIDI CC / Note data.*
 
+### Synth Patch Display (MIDI) — Behringer DeepMind 12
+
+![DeepMind 12 synth panel](docs/images/synth-dm12.svg)
+
+*"AURORA PAD" patch: VCO1 and VCO2 sections show 27-dot LED-arc knobs for octave, tuning, pulse width, and mix level. Filter section (blue) shows cutoff at 58 %, medium resonance, high envelope amount. Filter ENV (left) and Amp ENV (right) display ADSR shapes — the amp envelope has a near-zero decay and full sustain, giving the pad its characteristic hold. LFO1 and LFO2 run at slow rates with subtle depth. FX section shows Chorus at 50 %, Reverb at 65 %, and a touch of Delay. All values populate from a SysEx patch dump; filter cutoff and resonance also update live from CC 74 / 71.*
+
 ---
 
 ## Installation
@@ -81,7 +88,7 @@ Download the latest build artifacts from the [Actions tab](https://github.com/gr
 | **macOS (Apple Silicon)** | `obs-midi-viz-macos-arm64.tar.gz` | Extract, then copy `obs-midi-viz.plugin` → `~/Library/Application Support/obs-studio/plugins/` |
 | **Linux (x86-64)** | `obs-midi-viz-linux-x86_64.tar.gz` | Extract, then copy `obs-midi-viz/` → `~/.config/obs-studio/plugins/` |
 
-Restart OBS, then add sources via **+** → **Keys (MIDI)** / **Drums (MIDI)** / **CC Lanes (MIDI)** / **DJ Controller (MIDI)**.
+Restart OBS, then add sources via **+** → **Keys (MIDI)** / **Drums (MIDI)** / **CC Lanes (MIDI)** / **DJ Controller (MIDI)** / **Synth Patch Display (MIDI)**.
 
 ---
 
@@ -268,7 +275,8 @@ obs-midi-viz/
 │       ├── piano-source.*          # Keys (MIDI) — piano roll + waterfall
 │       ├── drum-source.*           # Drums (MIDI) — pad grid + device presets
 │       ├── cc-source.*             # CC Lanes (MIDI) — bar graph
-│       └── dj-source.*             # DJ Controller (MIDI) — DDJ-FLX4 skin
+│       ├── dj-source.*             # DJ Controller (MIDI) — DDJ-FLX4 skin
+│       └── synth-source.*          # Synth Patch Display (MIDI) — 4-model panels
 └── data/locale/en-US.ini           # OBS Properties panel strings
 ```
 
@@ -347,28 +355,34 @@ Vertical bar graph per CC lane with exponential smoothing, numeric value overlay
 then gravity decay, and a two-tone gradient fill that shifts hot (orange → red)
 when a lane exceeds 88 % of its range. Up to 8 lanes; tick marks at 25 / 50 / 75 %.
 
-### Phase 6 — Synthesizer Patch Displays 🔜
+### Phase 6 — Synthesizer Patch Displays ✅ (initial release)
 
-Per-synthesizer panel recreation that reads live parameter state via MIDI
-SysEx and renders it exactly as the hardware's own screen — patch architecture
-fully visible at a glance.
+Per-synthesizer panel that reads live parameter state via MIDI SysEx patch
+dumps and renders knobs, envelope shapes, and FX bars as a single GPU-composited
+OBS source. Multiple independent instances are supported — one per synth in your
+rig, each on its own MIDI port and channel.
 
-**Initial target: Behringer DeepMind 12**
+**Source: Synth Patch Display (MIDI)** — select model in Properties:
 
-The DM12 sends a SysEx parameter-change message every time any control is
-touched, and responds to a full patch dump request with a complete SysEx block
-(documented in the DM12 MIDI implementation chart).
+| Model | SysEx header | Panel sections |
+|---|---|---|
+| **Behringer DeepMind 12** | `F0 00 20 32 28 xx 01` | VCO1, VCO2, Filter, Amp, Filter ENV, Amp ENV, LFO1, LFO2, FX, Arp |
+| **Korg DSS-1** | `F0 42 xx 03` | DCO1, DCO2, DCF, DCA, ENV1, ENV2, LFO |
+| **Alesis QS7.1** | `F0 00 00 0E xx` | 4 Elements each with Level, Filter, Amp ENV, Mod ENV, LFO; FX levels |
+| **Yamaha PSR-540** | `F0 43 xx` | Master Vol/Pan, Tempo, Reverb, Chorus, Harmony, Voice bar |
 
-Planned display panels:
-- **OSC 1 & 2**: wave shape, tune (semi/fine), PW, PWM source/depth, level, sync
-- **Filter**: cutoff, resonance, env/vel/key amounts, HP mode
-- **Envelopes 1–4**: ADSR bars with live-position markers
-- **LFOs 1 & 2**: rate, waveform (drawn icon), delay, destination, depth
-- **Arpeggiator**: mode, octave range, hold state
-- **Chorus / Reverb FX**: parameters as labelled sliders
+Each panel renders **immediately** with demo defaults; parameters update once
+a SysEx bulk dump is received from the hardware (see Properties panel for
+per-model dump instructions). Filter cutoff (CC 74) and resonance (CC 71) also
+update live without a full dump.
 
-Additional targets: Roland JD-Xi, Korg Minilogue XD, Sequential Prophet-5
-(all publish MIDI SysEx specs).
+SysEx accumulation is handled by an extended `MidiEvent::raw` field added to
+the engine in v0.1.6.0 — the full byte vector is captured for every SysEx
+message and dispatched to subscribers alongside normal CC/Note events.
+
+Future additions: Roland JD-Xi, Korg Minilogue XD, Sequential Prophet-5,
+Arturia MiniFreak (all publish MIDI SysEx specs). Software synths (Serum,
+Vital) will be handled via the AbletonOSC / VST parameter bridge in Phase 8.
 
 ### Phase 7 — Polish 🔜
 CPack installers (NSIS for Windows, macOS pkg/dmg, Linux .deb); OBS source icons;

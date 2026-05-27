@@ -141,6 +141,11 @@ void MidiEngine::rtmidiCallback(double timestamp,
     default:   ev.type = MidiEventType::Other;         break;
     }
 
+    // Capture the full raw message for SysEx so subscribers can parse patch dumps.
+    // SysEx (0xF0) has status == 0xF0; type bits (0xF0 & 0xF0) == 0xF0 → falls to default above.
+    if (status == 0xF0)
+        ev.raw = *msg;
+
     std::lock_guard<std::mutex> lk(pd->engine->m_queueMutex);
     pd->engine->m_queue.push(ev);
 }

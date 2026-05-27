@@ -17,12 +17,13 @@
 enum class MidiEventType { NoteOn, NoteOff, ControlChange, PitchBend, Other };
 
 struct MidiEvent {
-    MidiEventType type      = MidiEventType::Other;
-    uint8_t       channel   = 0;   // 0–15
-    uint8_t       param1    = 0;   // note number or CC number
-    uint8_t       param2    = 0;   // velocity or CC value
-    double        timestamp = 0;   // seconds since last event (from RtMidi)
-    int           portIndex = -1;  // which port this event came from
+    MidiEventType        type      = MidiEventType::Other;
+    uint8_t              channel   = 0;   // 0–15
+    uint8_t              param1    = 0;   // note number or CC number
+    uint8_t              param2    = 0;   // velocity or CC value
+    double               timestamp = 0;   // seconds since last event (from RtMidi)
+    int                  portIndex = -1;  // which port this event came from
+    std::vector<uint8_t> raw;             // full raw bytes for SysEx (type==Other, raw[0]==0xF0)
 };
 
 using MidiCallback = std::function<void(const MidiEvent &)>;

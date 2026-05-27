@@ -657,5 +657,185 @@ function Write-DjSvg($file) {
 
 Write-DjSvg "$OutDir\dj-flx4.svg"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. SYNTH PATCH DISPLAY helpers — DeepMind 12   720 × 400
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Synth knob: 27-dot arc (same geometry as DJ knob, no centre-detent)
+function synthKnob($cx,$cy,$r,$value,$colorOn,$label) {
+    $PI  = [Math]::PI
+    $out = [System.Collections.Generic.List[string]]::new()
+    # Body
+    $out.Add("<circle cx='$(fmt $cx)' cy='$(fmt $cy)' r='$(fmt $r)' fill='#252525'/>")
+    $out.Add("<circle cx='$(fmt $cx)' cy='$(fmt $cy)' r='$(fmt ($r*0.6))' fill='#363636'/>")
+    $arcR = $r + 5.5
+    for ($i = 0; $i -lt 27; $i++) {
+        $deg = 225.0 + [double]$i * (270.0 / 26.0)
+        $rad = $deg * $PI / 180.0
+        $dx  = $cx + $arcR * [Math]::Sin($rad)
+        $dy  = $cy - $arcR * [Math]::Cos($rad)
+        $lit = ([double]$i / 26.0) -le ($value + 0.02)
+        $dc  = if ($lit) { $colorOn } else { '#1A1A1A' }
+        $out.Add("<circle cx='$(fmt $dx)' cy='$(fmt $dy)' r='1.5' fill='$dc'/>")
+    }
+    # Indicator dot
+    $ideg = 225.0 + $value * 270.0
+    $irad = $ideg * $PI / 180.0
+    $ix   = $cx + $r * 0.48 * [Math]::Sin($irad)
+    $iy   = $cy - $r * 0.48 * [Math]::Cos($irad)
+    $out.Add("<circle cx='$(fmt $ix)' cy='$(fmt $iy)' r='2' fill='#EEEEEE'/>")
+    # Label
+    if ($label -ne '') {
+        $out.Add("<text x='$(fmt $cx)' y='$(fmt ($cy+$r+12))' fill='#666666' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>$label</text>")
+    }
+    return $out
+}
+
+# ADSR envelope visualizer — returns a SVG <polygon> element
+function synthEnv($x,$y,$w,$h,$a,$d,$sv,$r,$col) {
+    $sHold = 0.28
+    $total = $a + $d + $sHold + $r
+    if ($total -lt 0.01) { $total = 1.0 }
+    $xA    = $x
+    $xD    = $x + ($a/$total)*$w
+    $xS    = $xD + ($d/$total)*$w
+    $xR    = $xS + ($sHold/$total)*$w
+    $xEnd  = $x + $w - 1
+    $yBot  = $y + $h - 2
+    $yTop  = $y + 2
+    $ySus  = $yBot - $sv*($h - 4)
+    $pts   = "$(fmt $xA),$(fmt $yBot) $(fmt $xD),$(fmt $yTop) $(fmt $xS),$(fmt $ySus) $(fmt $xR),$(fmt $ySus) $(fmt $xEnd),$(fmt $yBot)"
+    $alpha = '55'
+    $fillHex = $col.TrimStart('#')
+    $fill = "#${alpha}${fillHex}"
+    $out  = [System.Collections.Generic.List[string]]::new()
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='#0A0A0A'/>")
+    $out.Add("<polygon points='$pts' fill='$fill'/>")
+    $out.Add("<polyline points='$pts' fill='none' stroke='#$($col.TrimStart('#'))' stroke-width='1.5'/>")
+    return $out
+}
+
+# Horizontal level bar
+function synthHBar($x,$y,$w,$h,$val,$col) {
+    $bw   = $val * ($w - 4)
+    $out  = [System.Collections.Generic.List[string]]::new()
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='#0A0A0A' rx='1'/>")
+    if ($bw -gt 1) { $out.Add("<rect x='$(fmt ($x+2))' y='$(fmt ($y+2))' width='$(fmt $bw)' height='$(fmt ($h-4))' fill='$col' rx='1'/>") }
+    return $out
+}
+
+# Section background with coloured title strip
+function synthSection($x,$y,$w,$h,$title,$col) {
+    $out = [System.Collections.Generic.List[string]]::new()
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='#1C1C1C'/>")
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='18' fill='${col}38'/>")
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='1.5' fill='$col'/>")
+    if ($title -ne '') {
+        $out.Add("<text x='$(fmt ($x+$w*0.5))' y='$(fmt ($y+12))' fill='$col' font-family='Courier New,monospace' font-size='8px' font-weight='bold' text-anchor='middle'>$title</text>")
+    }
+    return $out
+}
+
+function synthAdd($sb, $lines) { foreach ($l in $lines) { $null = $sb.AppendLine($l) } }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 13. Write DeepMind 12 synth panel SVG
+#     Shows a realistic patch: pads/strings character with reverb & chorus
+# ─────────────────────────────────────────────────────────────────────────────
+function Write-SynthSvg($file) {
+    $W = 720; $H = 400
+    $sb = [System.Text.StringBuilder]::new()
+    $null = $sb.AppendLine("<?xml version='1.0' encoding='UTF-8'?>")
+    $null = $sb.AppendLine("<svg width='$W' height='$H' viewBox='0 0 $W $H' xmlns='http://www.w3.org/2000/svg'>")
+
+    # Canvas background
+    $null = $sb.AppendLine("<rect width='$W' height='$H' fill='#111111'/>")
+
+    # ── Header (y=0, h=36) ──────────────────────────────────────────────────
+    $null = $sb.AppendLine("<rect x='0' y='0' width='$W' height='36' fill='#071820'/>")
+    $null = $sb.AppendLine("<text x='10' y='24' fill='#FF8800' font-family='Courier New,monospace' font-size='14px' font-weight='bold'>DEEPMIND 12</text>")
+    $null = $sb.AppendLine("<text x='360' y='24' fill='#CCCCCC' font-family='Courier New,monospace' font-size='14px' font-weight='bold' text-anchor='middle'>AURORA PAD</text>")
+    $null = $sb.AppendLine("<text x='$(fmt ($W-8))' y='24' fill='#00CC44' font-family='Courier New,monospace' font-size='9px' text-anchor='end'>PATCH OK</text>")
+
+    # Patch parameters (pads/strings character)
+    $vco1  = @(0.50, 0.50, 0.65, 0.75)    # OCT TUN PW MIX
+    $vco2  = @(0.50, 0.53, 0.50, 0.25)    # slight detune
+    $filt  = @(0.58, 0.28, 0.62, 0.50)    # CUT RES ENV KEY
+    $env1  = @(0.18, 0.45, 0.55, 0.48)    # Filter ADSR
+    $env2  = @(0.12, 0.00, 1.00, 0.35)    # Amp ADSR (slow attack, full sustain)
+    $lfo1  = @(0.22, 0.18, 0.00)          # slow sine mod
+    $lfo2  = @(0.38, 0.12, 0.17)
+    $fx    = @(0.50, 0.65, 0.32)          # CHO REV DLY
+
+    # Layout constants
+    $R1Y=38; $R1H=108; $R2Y=148; $R2H=108; $R3Y=258; $R3H=80; $R4Y=340; $R4H=60
+    $KY1 = $R1Y + 18 + ($R1H-18)/2    # knob centre Y for row 1
+
+    # ── OSC row ──────────────────────────────────────────────────────────────
+    synthAdd $sb (synthSection  0  $R1Y 180 $R1H "VCO1" "#66AAFF")
+    synthAdd $sb (synthKnob  30 $KY1 18 $vco1[0] "#66AAFF" "OCT")
+    synthAdd $sb (synthKnob  75 $KY1 18 $vco1[1] "#66AAFF" "TUN")
+    synthAdd $sb (synthKnob 120 $KY1 18 $vco1[2] "#66AAFF" "PW")
+    synthAdd $sb (synthKnob 155 $KY1 16 $vco1[3] "#4488CC" "MIX")
+
+    synthAdd $sb (synthSection 182 $R1Y 178 $R1H "VCO2" "#66AAFF")
+    synthAdd $sb (synthKnob 212 $KY1 18 $vco2[0] "#66AAFF" "OCT")
+    synthAdd $sb (synthKnob 257 $KY1 18 $vco2[1] "#66AAFF" "TUN")
+    synthAdd $sb (synthKnob 302 $KY1 18 $vco2[2] "#66AAFF" "PW")
+    synthAdd $sb (synthKnob 337 $KY1 16 $vco2[3] "#4488CC" "MIX")
+
+    synthAdd $sb (synthSection 362 $R1Y 178 $R1H "FILTER" "#0088FF")
+    synthAdd $sb (synthKnob 392 $KY1 18 $filt[0] "#0088FF" "CUT")
+    synthAdd $sb (synthKnob 437 $KY1 18 $filt[1] "#0088FF" "RES")
+    synthAdd $sb (synthKnob 482 $KY1 18 $filt[2] "#44AAFF" "ENV")
+    synthAdd $sb (synthKnob 525 $KY1 16 $filt[3] "#2266AA" "KEY")
+
+    synthAdd $sb (synthSection 542 $R1Y 178 $R1H "AMP" "#AADD55")
+    synthAdd $sb (synthKnob 599 $KY1 22 0.75 "#AADD55" "VOL")
+    synthAdd $sb (synthKnob 670 $KY1 22 0.50 "#88AA44" "PAN")
+
+    # ── ENV row ──────────────────────────────────────────────────────────────
+    synthAdd $sb (synthSection  0 $R2Y 360 $R2H "FILTER ENV" "#0088FF")
+    synthAdd $sb (synthEnv 4 ($R2Y+20) 352 ($R2H-24) $env1[0] $env1[1] $env1[2] $env1[3] "0088FF")
+
+    synthAdd $sb (synthSection 362 $R2Y 358 $R2H "AMP ENV" "#00CC44")
+    synthAdd $sb (synthEnv 366 ($R2Y+20) 350 ($R2H-24) $env2[0] $env2[1] $env2[2] $env2[3] "00CC44")
+
+    # ── LFO + FX row ─────────────────────────────────────────────────────────
+    $KY3 = $R3Y + 18 + ($R3H-18)/2
+    synthAdd $sb (synthSection   0 $R3Y 180 $R3H "LFO1" "#AA44FF")
+    synthAdd $sb (synthKnob  35 $KY3 16 $lfo1[0] "#AA44FF" "RT")
+    synthAdd $sb (synthKnob  90 $KY3 16 $lfo1[1] "#AA44FF" "DP")
+    synthAdd $sb (synthKnob 145 $KY3 16 $lfo1[2] "#7733CC" "WV")
+
+    synthAdd $sb (synthSection 182 $R3Y 178 $R3H "LFO2" "#AA44FF")
+    synthAdd $sb (synthKnob 217 $KY3 16 $lfo2[0] "#AA44FF" "RT")
+    synthAdd $sb (synthKnob 272 $KY3 16 $lfo2[1] "#AA44FF" "DP")
+    synthAdd $sb (synthKnob 327 $KY3 16 $lfo2[2] "#7733CC" "WV")
+
+    synthAdd $sb (synthSection 362 $R3Y 358 $R3H "FX" "#FF4466")
+    $by0 = $R3Y + 24
+    synthAdd $sb (synthHBar 422 $by0        280 14 $fx[0] "#FF4466")
+    $null=$sb.AppendLine("<text x='$(fmt 417)' y='$(fmt ($by0+10))' fill='#888888' font-family='Courier New,monospace' font-size='8px' text-anchor='end'>CHO</text>")
+    synthAdd $sb (synthHBar 422 ($by0+18)   280 14 $fx[1] "#FF8833")
+    $null=$sb.AppendLine("<text x='$(fmt 417)' y='$(fmt ($by0+28))' fill='#888888' font-family='Courier New,monospace' font-size='8px' text-anchor='end'>REV</text>")
+    synthAdd $sb (synthHBar 422 ($by0+36)   280 14 $fx[2] "#FFDD22")
+    $null=$sb.AppendLine("<text x='$(fmt 417)' y='$(fmt ($by0+46))' fill='#888888' font-family='Courier New,monospace' font-size='8px' text-anchor='end'>DLY</text>")
+
+    # ── ARP + INFO row ────────────────────────────────────────────────────────
+    synthAdd $sb (synthSection  0  $R4Y 360 $R4H "ARP" "#FF8800")
+    $null=$sb.AppendLine("<circle cx='22' cy='$(fmt ($R4Y+40))' r='7' fill='#331100'/>")
+    $null=$sb.AppendLine("<text x='38' y='$(fmt ($R4Y+44))' fill='#554444' font-family='Courier New,monospace' font-size='9px'>OFF</text>")
+
+    synthAdd $sb (synthSection 362 $R4Y 358 $R4H "INFO" "#444444")
+    $null=$sb.AppendLine("<text x='370' y='$(fmt ($R4Y+30))' fill='#666666' font-family='Courier New,monospace' font-size='8px'>CH 1  PORT 0</text>")
+
+    $null = $sb.AppendLine("</svg>")
+    $sb.ToString() | Set-Content $file -Encoding UTF8
+    Write-Host "$(Split-Path $file -Leaf) done"
+}
+
+Write-SynthSvg "$OutDir\synth-dm12.svg"
+
 Write-Host "All mockup SVGs written to $OutDir"
 

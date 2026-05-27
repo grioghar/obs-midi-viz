@@ -4,6 +4,7 @@
 #include "sources/drum-source.hpp"
 #include "sources/cc-source.hpp"
 #include "sources/dj-source.hpp"
+#include "sources/synth-source.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -21,6 +22,7 @@ bool obs_module_load(void)
     drum_source_register();
     cc_source_register();
     dj_source_register();
+    synth_source_register();
 
     blog(LOG_INFO, "obs-midi-viz loaded successfully");
     return true;
