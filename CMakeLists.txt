@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(obs-midi-viz
-  VERSION 0.1.4.3
+  VERSION 0.1.4.4
   DESCRIPTION "MIDI visualizer plugin for OBS Studio"
   LANGUAGES CXX C
 )

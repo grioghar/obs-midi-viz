@@ -410,5 +410,252 @@ Write-StepSeqSvg "$OutDir\seq-tb303.svg" 640 480 `
         '7,8'=1.0     # G at col 8 — current, fully lit
     } 8
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. DJ CONTROLLER helpers — Pioneer DDJ-FLX4   1280 × 480
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Return a <circle> SVG element string
+function svgC($cx,$cy,$r,$fill) {
+    "<circle cx='$(fmt $cx)' cy='$(fmt $cy)' r='$(fmt $r)' fill='$fill'/>"
+}
+
+# Return a <rect> SVG element string
+function svgR($x,$y,$w,$h,$fill,$rx=0) {
+    "<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='$fill' rx='$rx'/>"
+}
+
+# Return a centred <text> SVG element string
+function svgT($x,$y,$text,$fill,$sz) {
+    "<text x='$(fmt $x)' y='$(fmt $y)' fill='$fill' font-family='Courier New,monospace' font-size='${sz}px' font-weight='bold' text-anchor='middle'>$text</text>"
+}
+
+# Return array of SVG strings for a rotary knob with 27-dot Pioneer LED arc
+#   value   : 0.0–1.0
+#   colorOn : hex colour of lit dots
+#   cDet    : $true = centre-detent (EQ style, lights from 0.5 outward)
+function djKnob($cx,$cy,$r,$value,$colorOn,$cDet) {
+    $PI = [Math]::PI
+    $out = [System.Collections.Generic.List[string]]::new()
+    $out.Add((svgC $cx $cy $r '#2E2E2E'))
+    $out.Add((svgC $cx $cy ($r * 0.65) '#484848'))
+    $arcR = $r + 6.0
+    for ($i = 0; $i -lt 27; $i++) {
+        $deg = 225.0 + [double]$i * (270.0 / 26.0)
+        $rad = $deg * $PI / 180.0
+        $dx  = $cx + $arcR * [Math]::Sin($rad)
+        $dy  = $cy - $arcR * [Math]::Cos($rad)
+        $frac = [double]$i / 26.0
+        if ($cDet) {
+            if ($value -ge 0.5) { $lit = ($frac -ge 0.48) -and ($frac -le ($value + 0.02)) }
+            else                { $lit = ($frac -ge ($value - 0.02)) -and ($frac -le 0.52) }
+        } else { $lit = $frac -le ($value + 0.02) }
+        $dc = if ($lit) { $colorOn } else { '#2A2A2A' }
+        $out.Add((svgC $dx $dy 2.2 $dc))
+    }
+    $pDeg = 225.0 + $value * 270.0
+    $pRad = $pDeg * $PI / 180.0
+    $out.Add((svgC ($cx + ($r * 0.42) * [Math]::Sin($pRad)) ($cy - ($r * 0.42) * [Math]::Cos($pRad)) 2.5 '#DDDDDD'))
+    return $out
+}
+
+# Return array of SVG strings for a jog wheel
+function djJog($cx,$cy,$r,$angleDeg,$playing) {
+    $PI = [Math]::PI
+    $out = [System.Collections.Generic.List[string]]::new()
+    $out.Add((svgC $cx $cy $r '#606060'))                           # outer rim
+    $out.Add((svgC $cx $cy ($r - 7)  '#141414'))                   # groove
+    $out.Add((svgC $cx $cy ($r - 11) '#282828'))                   # platter disc
+    $out.Add((svgC $cx $cy ($r * 0.25) '#5A5A5A'))                 # hub ring
+    $out.Add((svgC $cx $cy ($r * 0.16) '#383838'))                 # hub centre
+    # Rotating platter dot
+    $dotR  = $r - 24.0
+    $dRad  = $angleDeg * $PI / 180.0
+    $dox   = $cx + $dotR * [Math]::Sin($dRad)
+    $doy   = $cy - $dotR * [Math]::Cos($dRad)
+    $out.Add((svgC $dox $doy 4.5 '#999999'))
+    # Playing indicator — continuous green stroke ring
+    if ($playing) {
+        $rStr = fmt($r - 4.5)
+        $out.Add("<circle cx='$(fmt $cx)' cy='$(fmt $cy)' r='$rStr' fill='none' stroke='#00CC44' stroke-width='3' stroke-opacity='0.85'/>")
+    }
+    return $out
+}
+
+# Return array of SVG strings for a vertical fader (value 0=bottom, 1=top)
+function djVFader($cx,$y1,$y2,$value,$colorFill) {
+    $trackH = $y2 - $y1
+    $hy = $y2 - $value * $trackH
+    $out = [System.Collections.Generic.List[string]]::new()
+    $out.Add((svgR ($cx - 4)  $y1 8 $trackH '#333333' 3))          # track
+    if (($y2 - $hy) -gt 0) {
+        $out.Add((svgR ($cx - 2.5) $hy 5 ($y2 - $hy) $colorFill 2)) # fill
+    }
+    $out.Add((svgR ($cx - 11) ($hy - 6)   22 12 '#777777' 2))      # handle cap
+    $out.Add((svgR ($cx -  9) ($hy - 1.5) 18  3 '#CCCCCC' 1))      # cap groove
+    return $out
+}
+
+# Return array of SVG strings for a horizontal fader (value 0=left, 1=right)
+function djHFader($x1,$x2,$y,$value) {
+    $trackW = $x2 - $x1
+    $hx = $x1 + $value * $trackW
+    $out = [System.Collections.Generic.List[string]]::new()
+    $out.Add((svgR $x1 ($y - 4) $trackW 8 '#333333' 3))
+    if (($hx - $x1) -gt 0) {
+        $out.Add((svgR $x1 ($y - 3) ($hx - $x1) 6 '#FF8800' 2))
+    }
+    $out.Add((svgR ($hx - 7)   ($y - 13) 14 26 '#777777' 2))
+    $out.Add((svgR ($hx - 1.5) ($y - 11)  3 22 '#CCCCCC' 1))
+    return $out
+}
+
+# Return array of SVG strings for a labelled transport button
+function djButton($x,$y,$w,$h,$active,$colorAct,$label) {
+    $bg  = if ($active) { $colorAct } else { '#2A2A2A' }
+    $brd = if ($active) { $colorAct } else { '#4A4A4A' }
+    $tc  = if ($active) { '#FFFFFF'  } else { '#666666' }
+    $out = [System.Collections.Generic.List[string]]::new()
+    $out.Add((svgR $x $y $w $h $bg 3))
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='none' stroke='$brd' stroke-width='1' rx='3'/>")
+    if ($label -ne '') { $out.Add((svgT ($x + $w * 0.5) ($y + $h * 0.5 + 4) $label $tc 9)) }
+    return $out
+}
+
+# Append all lines from a list/array to a StringBuilder
+function djAdd($sb, $lines) { foreach ($l in $lines) { $null = $sb.AppendLine($l) } }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Write DJ controller mockup SVG
+#     Deck 0 (left, x=0-559)  : PLAYING — PLAY+SYNC active, EQ Hi boosted,
+#                                Low cut, Hot Cue 1 flashing red
+#     Deck 1 (right, x=720-1279): cued, all EQ neutral, not playing
+#     Mixer  (centre, x=560-719) : crossfader 35% toward Deck 0
+# ─────────────────────────────────────────────────────────────────────────────
+function Write-DjSvg($file) {
+    $W = 1280; $H = 480
+    $sb = [System.Text.StringBuilder]::new()
+    $null = $sb.AppendLine("<?xml version='1.0' encoding='UTF-8'?>")
+    $null = $sb.AppendLine("<svg width='$W' height='$H' viewBox='0 0 $W $H' xmlns='http://www.w3.org/2000/svg'>")
+
+    # Canvas background
+    $null = $sb.AppendLine((svgR 0 0 $W $H '#111111'))
+
+    # ── DECK 0 ───────────────────────────────────────────────────────────────
+    $null = $sb.AppendLine((svgR 0 0 558 $H '#1E1E1E'))
+    $null = $sb.AppendLine((svgR 556 0 2 $H '#3A3A3A'))
+
+    # Jog wheel — cx=230, cy=220, r=130, platter dot at 20°, PLAYING
+    djAdd $sb (djJog 230 220 130 20 $true)
+
+    # Knob column labels (deck 0: right side, x=425)
+    $null = $sb.AppendLine((svgT 425  56 'HI'   '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 425 131 'MID'  '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 425 206 'LO'   '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 425 278 'TRIM' '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 425 343 'FILT' '#AAAAAA' 9))
+
+    # Knobs: EQ Hi boosted (0.72), Mid flat (0.50), Low cut (0.30), Trim up (0.68), Filter open (0.55)
+    djAdd $sb (djKnob 425  82 22 0.72 '#FF8800' $true)   # EQ Hi  — boosted
+    djAdd $sb (djKnob 425 157 22 0.50 '#FF8800' $true)   # EQ Mid — flat
+    djAdd $sb (djKnob 425 232 22 0.30 '#FF8800' $true)   # EQ Low — cut
+    djAdd $sb (djKnob 425 302 18 0.68 '#FFDD00' $false)  # Trim
+    djAdd $sb (djKnob 425 367 18 0.55 '#00AAFF' $false)  # Filter
+
+    # Volume fader (far right of deck 0, x=510, value=0.78)
+    djAdd $sb (djVFader 510 48 360 0.78 '#FF8800')
+    $null = $sb.AppendLine((svgT 510 378 'VOL' '#AAAAAA' 8))
+
+    # Tempo fader (far left, x=50, value=0.52 — just above centre)
+    djAdd $sb (djVFader 50 48 360 0.52 '#888888')
+    $null = $sb.AppendLine((svgT 50 378 'TEMPO' '#AAAAAA' 8))
+
+    # Transport buttons — centred under jog (jogCx=230, rowW=215 → bx0=122.5)
+    $bx0=122.5; $bY=388; $bW=50; $bH=27; $bSp=5
+    djAdd $sb (djButton $bx0                     $bY $bW $bH $true  '#00CC44' 'PLAY')
+    djAdd $sb (djButton ($bx0+$bW+$bSp)          $bY $bW $bH $false '#0088FF' 'CUE')
+    djAdd $sb (djButton ($bx0+2*($bW+$bSp))      $bY $bW $bH $true  '#FF8800' 'SYNC')
+    djAdd $sb (djButton ($bx0+3*($bW+$bSp))      $bY $bW $bH $false '#00CCFF' 'LOOP')
+
+    # Hot-cue pads — centred under transport (px0=122.5, padY=432)
+    $hcColors=@('#FF2244','#2266FF','#22AA22','#FF8800')
+    $hcFlash =@(0.70, 0.22, 0.22, 0.22)   # HC1 just fired
+    $px0=122.5; $pY=432; $pW=50; $pH=30; $pSp=5
+    for ($p=0;$p-lt 4;$p++) {
+        $hc=$hcColors[$p]; $fl=$hcFlash[$p]; $bright=0.25+$fl*0.75
+        $hr=[Convert]::ToInt32($hc.Substring(1,2),16)
+        $hg=[Convert]::ToInt32($hc.Substring(3,2),16)
+        $hb=[Convert]::ToInt32($hc.Substring(5,2),16)
+        $pc='#{0:X2}{1:X2}{2:X2}' -f ([int]($hr*$bright)),([int]($hg*$bright)),([int]($hb*$bright))
+        $px=$px0+[double]$p*($pW+$pSp)
+        $null = $sb.AppendLine((svgR $px $pY $pW $pH $pc 3))
+        $null = $sb.AppendLine("<rect x='$(fmt $px)' y='$(fmt $pY)' width='$(fmt $pW)' height='$(fmt $pH)' fill='none' stroke='#555555' stroke-width='1' rx='3'/>")
+        $null = $sb.AppendLine((svgT ($px+$pW*0.5) ($pY+$pH*0.5+4) ($p+1) '#FFFFFF' 9))
+    }
+
+    # ── MIXER ────────────────────────────────────────────────────────────────
+    $null = $sb.AppendLine((svgR 560 0 160 $H '#191919'))
+    $null = $sb.AppendLine((svgR 560 0   1 $H '#3A3A3A'))
+    $null = $sb.AppendLine((svgR 719 0   1 $H '#3A3A3A'))
+    $null = $sb.AppendLine((svgT 640 30 'MIX' '#FF8800' 14))
+    djAdd $sb (djHFader 578 702 430 0.38)     # crossfader: 38% toward Deck 0
+    $null = $sb.AppendLine((svgT 640 452 'XFADER' '#AAAAAA' 9))
+
+    # ── DECK 1 ───────────────────────────────────────────────────────────────
+    $null = $sb.AppendLine((svgR 720 0 560 $H '#1E1E1E'))
+    $null = $sb.AppendLine((svgR 720 0   2 $H '#3A3A3A'))
+
+    # Jog wheel — cx=1050, cy=220, r=130, platter dot at 240°, NOT playing
+    djAdd $sb (djJog 1050 220 130 240 $false)
+
+    # Knob column labels (deck 1 mirrored: knobX=856)
+    $null = $sb.AppendLine((svgT 856  56 'HI'   '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 856 131 'MID'  '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 856 206 'LO'   '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 856 278 'TRIM' '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 856 343 'FILT' '#AAAAAA' 9))
+
+    # Knobs (EQ neutral, trim/filter slightly off centre)
+    djAdd $sb (djKnob 856  82 22 0.50 '#FF8800' $true)   # EQ Hi
+    djAdd $sb (djKnob 856 157 22 0.50 '#FF8800' $true)   # EQ Mid
+    djAdd $sb (djKnob 856 232 22 0.50 '#FF8800' $true)   # EQ Low
+    djAdd $sb (djKnob 856 302 18 0.55 '#FFDD00' $false)  # Trim
+    djAdd $sb (djKnob 856 367 18 0.44 '#00AAFF' $false)  # Filter
+
+    # Volume fader (mirrored: far left of deck 1 zone = x=772)
+    djAdd $sb (djVFader 772 48 360 0.62 '#FF8800')
+    $null = $sb.AppendLine((svgT 772 378 'VOL' '#AAAAAA' 8))
+
+    # Tempo fader (mirrored: far right = x=1230)
+    djAdd $sb (djVFader 1230 48 360 0.50 '#888888')
+    $null = $sb.AppendLine((svgT 1230 378 'TEMPO' '#AAAAAA' 8))
+
+    # Transport buttons — centred under jog (jogCx=1050 → bx1=942.5)
+    $bx1=942.5
+    djAdd $sb (djButton $bx1                      $bY $bW $bH $false '#00CC44' 'PLAY')
+    djAdd $sb (djButton ($bx1+$bW+$bSp)           $bY $bW $bH $false '#0088FF' 'CUE')
+    djAdd $sb (djButton ($bx1+2*($bW+$bSp))       $bY $bW $bH $false '#FF8800' 'SYNC')
+    djAdd $sb (djButton ($bx1+3*($bW+$bSp))       $bY $bW $bH $false '#00CCFF' 'LOOP')
+
+    # Hot-cue pads (all dim, deck 1)
+    $px1=942.5
+    for ($p=0;$p-lt 4;$p++) {
+        $hc=$hcColors[$p]; $fl=0.22; $bright=0.25+$fl*0.75
+        $hr=[Convert]::ToInt32($hc.Substring(1,2),16)
+        $hg=[Convert]::ToInt32($hc.Substring(3,2),16)
+        $hb=[Convert]::ToInt32($hc.Substring(5,2),16)
+        $pc='#{0:X2}{1:X2}{2:X2}' -f ([int]($hr*$bright)),([int]($hg*$bright)),([int]($hb*$bright))
+        $px=$px1+[double]$p*($pW+$pSp)
+        $null = $sb.AppendLine((svgR $px $pY $pW $pH $pc 3))
+        $null = $sb.AppendLine("<rect x='$(fmt $px)' y='$(fmt $pY)' width='$(fmt $pW)' height='$(fmt $pH)' fill='none' stroke='#555555' stroke-width='1' rx='3'/>")
+        $null = $sb.AppendLine((svgT ($px+$pW*0.5) ($pY+$pH*0.5+4) ($p+1) '#FFFFFF' 9))
+    }
+
+    $null = $sb.AppendLine("</svg>")
+    $sb.ToString() | Set-Content $file -Encoding UTF8
+    Write-Host "$(Split-Path $file -Leaf) done"
+}
+
+Write-DjSvg "$OutDir\dj-flx4.svg"
+
 Write-Host "All mockup SVGs written to $OutDir"
 

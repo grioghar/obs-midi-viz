@@ -13,8 +13,9 @@
 | **Keys (MIDI)** | Full 128-key piano roll with velocity-coloured keys; up to 4 independent MIDI controllers, each with its own colour, blending onto a single roll; Synthesia-style falling-note waterfall that fills the canvas with a configurable keyboard height strip at the bottom |
 | **Drums (MIDI)** | Pad grid (any size up to 8×8) with velocity-scaled flash decay; 25 device presets (TR-808, MPC 3000, Maschine, Launchpad, and more); three pad styles (Square, Rounded, Circle); GM drum name labels drawn with a GPU-side 3×5 bitmap font |
 | **CC Lanes (MIDI)** | Per-CC vertical bars with configurable smoothing for mod wheel, expression, sustain, filter, and any other CC number |
+| **DJ Controller (MIDI)** | Two-deck Pioneer DDJ-FLX4 (and compatible AlphaTheta controllers) top-down schematic with live-animated jog wheels, 27-dot LED-arc rotary knobs (EQ Hi/Mid/Lo, Trim, Filter), vertical channel faders, horizontal crossfader, transport buttons (Play/Cue/Sync/Loop), and 4 hot-cue pads per deck; every control driven directly from MIDI CC and Note data in real time |
 
-All three sources are independent — add, resize, reorder, and show/hide them per scene.
+All sources are independent — add, resize, reorder, and show/hide them per scene.
 
 ---
 
@@ -62,6 +63,12 @@ All three sources are independent — add, resize, reorder, and show/hide them p
 
 *12-row chromatic pitch-class display (C through B). Any octave of a note fires the same row — here an A-minor acid figure has built up a scrolling green pattern. Step 9 fired a G (row 7 fully lit); earlier steps show the A → C → D → E → G → A → C ascent fading to the left. Steps 10–16 are idle.*
 
+### DJ Controller (MIDI) — Pioneer DDJ-FLX4 layout
+
+![DDJ-FLX4 DJ controller](docs/images/dj-flx4.svg)
+
+*Deck 1 (left) is playing — green ring glows around the spinning jog wheel, PLAY and SYNC are lit orange and green. EQ High is boosted (arc lights above centre), Low is rolled off (arc lights below centre), Hot Cue 1 just fired (red pad flash). Deck 2 (right) is cued and ready with neutral EQ; crossfader sits 38 % toward Deck 1. Every knob, fader, button, and pad updates live from MIDI CC / Note data.*
+
 ---
 
 ## Installation
@@ -74,7 +81,7 @@ Download the latest build artifacts from the [Actions tab](https://github.com/gr
 | **macOS (Apple Silicon)** | `obs-midi-viz-macos-arm64.tar.gz` | Extract, then copy `obs-midi-viz.plugin` → `~/Library/Application Support/obs-studio/plugins/` |
 | **Linux (x86-64)** | `obs-midi-viz-linux-x86_64.tar.gz` | Extract, then copy `obs-midi-viz/` → `~/.config/obs-studio/plugins/` |
 
-Restart OBS, then add sources via **+** → **Keys (MIDI)** / **Drums (MIDI)** / **CC Lanes (MIDI)**.
+Restart OBS, then add sources via **+** → **Keys (MIDI)** / **Drums (MIDI)** / **CC Lanes (MIDI)** / **DJ Controller (MIDI)**.
 
 ---
 
@@ -260,7 +267,8 @@ obs-midi-viz/
 │   └── sources/
 │       ├── piano-source.*          # Keys (MIDI) — piano roll + waterfall
 │       ├── drum-source.*           # Drums (MIDI) — pad grid + device presets
-│       └── cc-source.*             # CC Lanes (MIDI) — bar graph
+│       ├── cc-source.*             # CC Lanes (MIDI) — bar graph
+│       └── dj-source.*             # DJ Controller (MIDI) — DDJ-FLX4 skin
 └── data/locale/en-US.ini           # OBS Properties panel strings
 ```
 
@@ -306,40 +314,32 @@ presets (e.g. "Roland TR-808 (Step Seq)").
 
 Still to come: Launchpad auxiliary button rows; LaunchControl XL knob rings.
 
-#### 4d — DJ controller skins 🔜
+#### 4d — DJ controller skins ✅
 
-Graphically accurate top-down schematics of 2-deck DJ controllers. Every
-physical control is represented and animated in real time from MIDI data —
-no polling, no approximation.
+Graphically accurate top-down schematic of a 2-deck DJ controller, every
+physical control animated in real time from MIDI data — no polling, no
+approximation.
 
-**Initial target: Pioneer DJ DDJ-FLX4** (and compatible AlphaTheta 2-deck controllers)
+**Implemented: Pioneer DJ DDJ-FLX4** (and compatible AlphaTheta 2-deck controllers)
 
 | Control | How it works |
 |---|---|
-| EQ Hi / Mid / Low (per channel) | CC value → knob rotates 270° sweep |
-| Gain / Trim | CC → rotary knob |
-| Filter knob | CC → rotary knob |
-| Channel faders (×2) | CC → vertical slider |
-| Crossfader | CC → horizontal slider |
-| Jog wheels (×2) | Relative CC accumulates → spinning platter disc with position marker |
-| Play / Cue / Sync / Loop buttons | Note state → button illuminates / dims |
-| Hot-cue pads (×8) | Note velocity / Note-on → pad lights per the software's LED colour |
-| BPM display | MIDI Clock pulses → tempo readout |
+| EQ Hi / Mid / Low (per channel) | CC value → 27-dot LED arc (centre-detent) |
+| Gain / Trim | CC → 27-dot LED arc (sweep from zero) |
+| Filter knob | CC → 27-dot LED arc |
+| Channel faders (×2) | CC → vertical slider with lit fill track |
+| Crossfader | CC → horizontal slider with lit fill |
+| Jog wheels (×2) | Relative CC accumulates → spinning platter disc with marker dot |
+| Play / Cue / Sync / Loop | Note state → button illuminates in themed colour |
+| Hot-cue pads (×4 per deck) | Note On → pad flashes to full colour; decays 8 ×/s |
+
+**Canvas** 1280 × 480 (configurable). **MIDI channels** configurable per deck
+(defaults: Deck 1 = Ch 1, Deck 2 = Ch 2, Mixer = Ch 6).
 
 **What MIDI alone cannot deliver** (reserved for Phase 7 — DAW Integration):
 audio waveforms, track titles, playhead position, beat-grid alignment.
 
-Additional targets after FLX4: DDJ-400, DDJ-REV5, Denon SC Live series,
-Rane Seventy-Two mixer section.
-
-> **Implementation note on graphical accuracy**
-> The renderer draws a dimensionally proportioned top-down schematic: panel
-> background with labelled zones, knobs as circles with a rotating indicator
-> line, faders as slotted tracks with a moving handle, jog wheels as
-> concentric rings with a platter mark.  The layout matches the physical
-> controller so muscle memory maps directly between hardware and screen.
-> Pioneer/AlphaTheta logo marks and photorealistic textures are omitted to
-> stay clear of trademark concerns; everything else is faithful.
+Additional targets: DDJ-400, DDJ-REV5, Denon SC Live series, Rane Seventy-Two.
 
 #### 4e — Synthesizer patch displays 🔜
 
