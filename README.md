@@ -306,9 +306,63 @@ presets (e.g. "Roland TR-808 (Step Seq)").
 
 Still to come: Launchpad auxiliary button rows; LaunchControl XL knob rings.
 
-#### 4d — DJ deck and controller skins 🔜
-Pioneer CDJ/XDJ waveform area visualisation; Rane Seventy-Two EQ section;
-LaunchControl bank switching visualisation.
+#### 4d — DJ controller skins 🔜
+
+Graphically accurate top-down schematics of 2-deck DJ controllers. Every
+physical control is represented and animated in real time from MIDI data —
+no polling, no approximation.
+
+**Initial target: Pioneer DJ DDJ-FLX4** (and compatible AlphaTheta 2-deck controllers)
+
+| Control | How it works |
+|---|---|
+| EQ Hi / Mid / Low (per channel) | CC value → knob rotates 270° sweep |
+| Gain / Trim | CC → rotary knob |
+| Filter knob | CC → rotary knob |
+| Channel faders (×2) | CC → vertical slider |
+| Crossfader | CC → horizontal slider |
+| Jog wheels (×2) | Relative CC accumulates → spinning platter disc with position marker |
+| Play / Cue / Sync / Loop buttons | Note state → button illuminates / dims |
+| Hot-cue pads (×8) | Note velocity / Note-on → pad lights per the software's LED colour |
+| BPM display | MIDI Clock pulses → tempo readout |
+
+**What MIDI alone cannot deliver** (reserved for Phase 7 — DAW Integration):
+audio waveforms, track titles, playhead position, beat-grid alignment.
+
+Additional targets after FLX4: DDJ-400, DDJ-REV5, Denon SC Live series,
+Rane Seventy-Two mixer section.
+
+> **Implementation note on graphical accuracy**
+> The renderer draws a dimensionally proportioned top-down schematic: panel
+> background with labelled zones, knobs as circles with a rotating indicator
+> line, faders as slotted tracks with a moving handle, jog wheels as
+> concentric rings with a platter mark.  The layout matches the physical
+> controller so muscle memory maps directly between hardware and screen.
+> Pioneer/AlphaTheta logo marks and photorealistic textures are omitted to
+> stay clear of trademark concerns; everything else is faithful.
+
+#### 4e — Synthesizer patch displays 🔜
+
+Per-synthesizer panel recreation that reads live parameter state via MIDI
+SysEx and displays it exactly as the hardware's own screen does.
+
+**Initial target: Behringer DeepMind 12**
+
+The DM12 sends a SysEx parameter-change message every time you touch any
+control (CC, NRPN, or single-parameter SysEx depending on the control),
+and responds to a full patch dump request with a complete SysEx block
+(documented in the DM12 MIDI implementation chart).
+
+Planned display panels:
+- **OSC 1 & 2**: wave shape, tune (semi/fine), PW, PWM source/depth, level, sync
+- **Filter**: cutoff, resonance, env/vel/key amounts, HP mode
+- **Envelopes 1–4**: ADSR bars with live-position markers
+- **LFOs 1 & 2**: rate, waveform (drawn icon), delay, destination, depth
+- **Arpeggiator**: mode, octave range, hold state
+- **Chorus / Reverb FX**: parameters as labelled sliders
+
+Additional targets: Roland JD-Xi, Korg Minilogue XD, Sequential Prophet-5
+(all publish MIDI SysEx specs).
 
 ### Phase 5 — CC Lanes renderer 🔜
 Actual vertical bar graph per CC lane with animated smoothing, numeric value
@@ -318,6 +372,41 @@ overlay, and configurable CC assignments per lane.
 CPack installers (NSIS for Windows, macOS pkg/dmg, Linux .deb); OBS source icons;
 code signing + notarization for macOS (eliminates xattr requirement);
 per-scene preset save/restore; MIDI channel filtering.
+
+### Phase 7 — DAW Integration 🔜
+
+Bidirectional state bridge between obs-midi-viz and host DAW software.
+Rather than reacting only to raw MIDI bytes, Phase 7 lets the plugin read
+rich session state — clip names, track levels, scene names, playhead
+position, waveform data — and reflect it in OBS sources.
+
+**Transport / sync layer**
+- [Ableton Link](https://ableton.github.io/link/) (MIT, no extra install):
+  phase-locked BPM and beat position across all Link-enabled apps on the
+  LAN; drop-in replacement for unreliable MIDI Clock.
+
+**Ableton Live**
+- [AbletonOSC](https://github.com/ideoforms/AbletonOSC) — free, open-source
+  Max for Live device; exposes the full Live Object Model over UDP/OSC:
+  track names, clip names, playing state, send/return levels, scene index,
+  current BPM, loop region, and more.
+- Planned OBS source: **Ableton (Session View)** — grid of scenes × tracks
+  with currently-playing clips lit, volume meters, and BPM overlay.
+
+**Implementation path**
+- New dependency: `oscpack` (BSD-licensed, header-only compatible, already
+  used in OBS itself) adds a lightweight UDP OSC receiver thread.
+- New `MidiEngine`-parallel class `OscReceiver` that publishes named
+  parameter streams; sources subscribe the same way they subscribe to MIDI.
+- Phase 7 sources are additive — all Phase 1–6 sources continue to work
+  unchanged.
+
+**DJ software (Rekordbox, Serato)**
+- Rekordbox exports beat/BPM/key via OSC when "MIDI" mode is active.
+- Full waveform + track metadata requires AlphaTheta's ProDJ Link protocol
+  (reverse-engineered via [dysentery](https://github.com/Deep-Symmetry/dysentery))
+  or the Rekordbox SDK (closed, NDA required).  Phase 7 will implement the
+  open ProDJ Link path first; SDK integration depends on licensing.
 
 ---
 
