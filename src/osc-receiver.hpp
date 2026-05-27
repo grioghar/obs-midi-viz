@@ -86,10 +86,15 @@ public:
     // MUST be called from the OBS render/tick thread (not from the background thread).
     void drainQueue();
 
+    // Pimpl type — forward-declared public so the free background-thread function
+    // in osc-receiver.cpp can name it in its parameter signature.  The full
+    // definition (and therefore the actual implementation details) lives only in
+    // osc-receiver.cpp and is never visible to users of this header.
+    struct Impl;
+
 private:
     OscReceiver();
     ~OscReceiver();
 
-    struct Impl;
     std::unique_ptr<Impl> m_impl;
 };
