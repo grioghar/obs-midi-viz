@@ -111,15 +111,22 @@ Pick a preset from the **Device Preset** dropdown in the source properties.
 It auto-fills the grid size, base note, colours, and pad style — you can then
 fine-tune any individual field.
 
+Presets marked **(Step Seq)** use the **step-sequencer layout**: instruments as
+rows, 16 time steps as columns. The other presets use the standard **pad grid** layout.
+
 ### Roland
 
-| Preset | Grid | Pad Style | Notable use |
-|---|---|---|---|
-| Roland TR-808 | 4×4 | Square | Trap, hip-hop, 808 bass |
-| Roland TR-909 | 4×4 | Square | House, techno |
-| Roland TR-707 | 4×4 | Square | Pop, early electronic |
-| Roland TR-606 | 2×3 | Square | Acid, TB-303 companion |
-| Roland SP-404 | 4×4 | Square | Lo-fi, beat tapes |
+| Preset | Layout | Grid / Rows | Pad Style | Notable use |
+|---|---|---|---|---|
+| Roland TR-808 | Pad grid | 4×4 | Square | Trap, hip-hop, 808 bass |
+| Roland TR-808 (Step Seq) | Step seq | 8 rows × 16 steps | — | BD/SD/CP/CH/OH/LT/MT/HT |
+| Roland TR-909 | Pad grid | 4×4 | Square | House, techno |
+| Roland TR-909 (Step Seq) | Step seq | 8 rows × 16 steps | — | BD/SD/RM/CP/CH/OH/LT/HT |
+| Roland TR-707 | Pad grid | 4×4 | Square | Pop, early electronic |
+| Roland TR-707 (Step Seq) | Step seq | 8 rows × 16 steps | — | BD/SD/RM/CH/OH/LT/MT/CY |
+| Roland TR-606 | Pad grid | 2×3 | Square | Acid, TB-303 companion |
+| Roland SP-404 | Pad grid | 4×4 | Square | Lo-fi, beat tapes |
+| Roland TB-303 (Bassline) | Step seq | 12 rows × 16 steps | — | Chromatic pitch-class acid bass |
 
 ### Akai MPC
 
@@ -267,14 +274,25 @@ per device, all open simultaneously); MIDI device selector in every source.
 GPU-side pad grid with velocity flash; 3×5 bitmap font labels (GM drum names or note numbers); proportional gaps; luminance-adaptive text colour.
 
 #### 4b — Device preset system ✅
-25 presets across Roland, Akai MPC, NI Maschine, Novation Launchpad, Elektron,
+29 presets across Roland, Akai MPC, NI Maschine, Novation Launchpad, Elektron,
 Arturia, Korg, and hip-hop heritage machines (SP-1200, Oberheim DMX, LinnDrum).
 Three pad styles: Square, Rounded, Circle. Separate panel/idle/hit colours per preset.
 Selecting a preset auto-fills all grid and colour properties.
 
-#### 4c — Authentic step-sequencer layouts 🔜
-TR-808/909/707 in their native 16-step row-per-instrument view (not a 4×4 grid);
-Launchpad top/right auxiliary button rows; LaunchControl XL with knob rings.
+#### 4c — Authentic step-sequencer layouts ✅
+TR-808, TR-909, and TR-707 in their native **16-step row-per-instrument** view —
+instruments as horizontal rows (BD, SD, CP, CH, OH, LT, MT, HT), time steps as
+columns; a current-step highlight band scrolls right as notes arrive; group
+separator lines mark every 4 steps (one bar).
+
+**Roland TB-303 (Transistor Bass / Bassline)** — 12-row chromatic pitch-class view:
+each row is one semitone (C through B), any octave of that pitch fires the same row.
+Acid basslines build up a scrolling chromatic pattern in the signature TB-303 green.
+
+Step-seq presets appear in the Device Preset dropdown alongside the existing pad-grid
+presets (e.g. "Roland TR-808 (Step Seq)").
+
+Still to come: Launchpad auxiliary button rows; LaunchControl XL knob rings.
 
 #### 4d — DJ deck and controller skins 🔜
 Pioneer CDJ/XDJ waveform area visualisation; Rane Seventy-Two EQ section;
