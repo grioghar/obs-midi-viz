@@ -6,8 +6,12 @@
 #include <array>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Default GM drum note → pad label mapping (General MIDI percussion map)
+// General MIDI percussion map (note 35–81); everything else is nullptr.
 // ─────────────────────────────────────────────────────────────────────────────
+// Used by Phase 4 pad-label rendering; suppress unused-variable warning for now
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((unused))
+#endif
 static const char *GM_DRUM_NAMES[128] = {
     nullptr,nullptr,nullptr,nullptr,nullptr, // 0–4
     nullptr,nullptr,nullptr,nullptr,nullptr, // 5–9
@@ -46,6 +50,7 @@ struct DrumSource {
 
     int  columns    = 4;
     int  rows       = 4;
+    int  baseNote   = 36;   // MIDI note for the first pad (GM = 36 = Bass Drum 1)
     bool showLabels = true;
 
     uint32_t colorHit  = 0xFFFF6600;
@@ -68,12 +73,15 @@ struct DrumSource {
 // ─────────────────────────────────────────────────────────────────────────────
 static void apply_midi_port(int portIdx)
 {
-    auto &eng = MidiEngine::instance();
-    if (portIdx < 0) {
-        if (eng.isOpen()) eng.closePort();
-    } else if (portIdx != eng.currentPort() || !eng.isOpen()) {
-        eng.openPort(portIdx);
-    }
+    if (portIdx >= 0)
+        MidiEngine::instance().openPort(portIdx);
+}
+
+static void rebuild_pad_notes(DrumSource *s)
+{
+    int totalPads = s->rows * s->columns;
+    for (int i = 0; i < DrumSource::MAX_PADS; ++i)
+        s->padNote[i] = (i < totalPads) ? (s->baseNote + i) : -1;
 }
 
 static const char *drum_get_name(void *) { return obs_module_text("DrumSource.Name"); }
@@ -84,24 +92,38 @@ static void *drum_create(obs_data_t *settings, obs_source_t *source)
     auto *s = new DrumSource{};
     s->columns    = (int)obs_data_get_int(settings, "columns");
     s->rows       = (int)obs_data_get_int(settings, "rows");
+    s->baseNote   = (int)obs_data_get_int(settings, "base_note");
     s->showLabels = obs_data_get_bool(settings, "show_labels");
     s->colorHit   = (uint32_t)obs_data_get_int(settings, "color_hit");
     s->colorIdle  = (uint32_t)obs_data_get_int(settings, "color_idle");
     s->midiPort   = (int)obs_data_get_int(settings, "midi_port");
 
+    rebuild_pad_notes(s);
     apply_midi_port(s->midiPort);
 
     s->midiHandle = MidiEngine::instance().subscribe([s](const MidiEvent &ev) {
+        if (ev.portIndex != s->midiPort && s->midiPort >= 0) return;
         if (ev.type != MidiEventType::NoteOn) return;
+
+        bool matched = false;
         for (int i = 0; i < DrumSource::MAX_PADS; ++i) {
-            if (s->padNote[i] == ev.param1) {
+            if (s->padNote[i] == (int)ev.param1) {
                 s->padFlash[i] = ev.param2 / 127.0f;
+                matched = true;
                 break;
             }
         }
+        if (!matched) {
+            // Help the user diagnose controller mappings.
+            // OBS log: Tools → Log Files → View Current Log File
+            MIDI_LOG_INFO(
+                "Drum: received unmapped NoteOn %d (vel=%d ch=%d port=%d). "
+                "Adjust 'Base Note' in source properties if this is your pad controller.",
+                (int)ev.param1, (int)ev.param2, (int)ev.channel, ev.portIndex);
+        }
     });
 
-    MIDI_LOG_INFO("Drum source created (%dx%d grid)", s->columns, s->rows);
+    MIDI_LOG_INFO("Drum source created (%dx%d, baseNote=%d)", s->columns, s->rows, s->baseNote);
     return s;
 }
 
@@ -115,11 +137,12 @@ static void drum_destroy(void *data)
 static void drum_defaults(obs_data_t *settings)
 {
     obs_data_set_default_int( settings, "midi_port",    -1);
-    obs_data_set_default_int( settings, "columns",      4);
-    obs_data_set_default_int( settings, "rows",         4);
+    obs_data_set_default_int( settings, "columns",       4);
+    obs_data_set_default_int( settings, "rows",          4);
+    obs_data_set_default_int( settings, "base_note",    36);
     obs_data_set_default_bool(settings, "show_labels",  true);
-    obs_data_set_default_int( settings, "color_hit",    0xFFFF6600);
-    obs_data_set_default_int( settings, "color_idle",   0xFF1A1A2E);
+    obs_data_set_default_int( settings, "color_hit",    (int64_t)0xFFFF6600u);
+    obs_data_set_default_int( settings, "color_idle",   (int64_t)0xFF1A1A2Eu);
 }
 
 static obs_properties_t *drum_properties(void *)
@@ -144,25 +167,26 @@ static obs_properties_t *drum_properties(void *)
             return true;
         });
 
-    obs_properties_add_int( props, "columns",     "Grid columns", 1, 8, 1);
-    obs_properties_add_int( props, "rows",        "Grid rows",    1, 8, 1);
-    obs_properties_add_bool(props, "show_labels", "Show pad labels");
+    obs_properties_add_int( props, "columns",    "Grid columns",          1, 8, 1);
+    obs_properties_add_int( props, "rows",       "Grid rows",             1, 8, 1);
+    obs_properties_add_int( props, "base_note",  "Base Note (first pad)", 0, 120, 1);
+    obs_properties_add_bool(props, "show_labels","Show pad labels");
     obs_properties_add_color(props, "color_hit",  "Hit colour");
     obs_properties_add_color(props, "color_idle", "Idle colour");
     return props;
 }
 
-// Proper in-place update — do NOT destroy+recreate (the returned pointer from
-// create would be discarded, leaving OBS with a dangling pointer).
 static void drum_update(void *data, obs_data_t *settings)
 {
     auto *s = static_cast<DrumSource *>(data);
     s->columns    = (int)obs_data_get_int(settings, "columns");
     s->rows       = (int)obs_data_get_int(settings, "rows");
+    s->baseNote   = (int)obs_data_get_int(settings, "base_note");
     s->showLabels = obs_data_get_bool(settings, "show_labels");
     s->colorHit   = (uint32_t)obs_data_get_int(settings, "color_hit");
     s->colorIdle  = (uint32_t)obs_data_get_int(settings, "color_idle");
     s->midiPort   = (int)obs_data_get_int(settings, "midi_port");
+    rebuild_pad_notes(s);
     apply_midi_port(s->midiPort);
 }
 
@@ -181,8 +205,6 @@ static uint32_t drum_get_height(void *data) { return static_cast<DrumSource*>(da
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Render — placeholder solid-colour flash (Phase 4 will draw the actual grid)
-// Uses gs_technique_begin/end directly; gs_effect_loop cannot be nested inside
-// OBS's own compositing pass (would log "An effect is already active" at 60fps).
 // ─────────────────────────────────────────────────────────────────────────────
 static void drum_render(void *data, gs_effect_t *effect)
 {

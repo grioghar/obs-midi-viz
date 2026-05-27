@@ -4,45 +4,70 @@
 #include <obs-module.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <deque>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Keyboard layout
+// Keyboard layout helpers
 // ─────────────────────────────────────────────────────────────────────────────
-// semitone 0=C 1=C# 2=D 3=D# 4=E 5=F 6=F# 7=G 8=G# 9=A 10=A# 11=B
 static const bool kIsBlack[12] = {
     false, true,  false, true,  false,
     false, true,  false, true,  false,
     true,  false
 };
 
-static constexpr float kBlackW       = 0.58f;  // fraction of white key width
-static constexpr float kBlackH       = 0.62f;  // fraction of keyboard height
-static constexpr int   kWaterfallMax = 180;    // rows of history
+static constexpr float kBlackW       = 0.58f;
+static constexpr float kBlackH       = 0.62f;
+static constexpr int   kWaterfallMax = 240;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-instance state
 // ─────────────────────────────────────────────────────────────────────────────
 struct PianoSource {
-    std::array<uint8_t, 128> noteVelocity{};
-    std::array<float,   128> noteDecay{};
+    static constexpr int MAX_CONTROLLERS = 4;
 
-    int      keyMin        = 21;   // A0
-    int      keyMax        = 108;  // C8
-    bool     showWaterfall = false;
-    uint32_t colorOn       = 0xFF44AAFF;
-    uint32_t colorOff      = 0xFF222222;
-    uint32_t cx            = 1280;
-    uint32_t cy            = 200;
-    uint32_t midiHandle    = 0;
-    int      midiPort      = -1;   // -1 = disabled
+    // Per-controller note state
+    struct Controller {
+        int      portIndex = -1;
+        uint32_t color     = 0xFF44AAFF;
+    };
+    Controller controllers[MAX_CONTROLLERS];
 
-    // Waterfall: index 0 = oldest (top), back = newest (bottom / closest to keys)
-    std::deque<std::array<float, 128>> waterfall;
+    // [controller][note]: held velocity (>0 = key down) and visual decay
+    std::array<uint8_t, 128> noteHeld [MAX_CONTROLLERS] = {};
+    std::array<float,   128> noteDecay[MAX_CONTROLLERS] = {};
+
+    int      keyMin         = 21;
+    int      keyMax         = 108;
+    bool     showWaterfall  = false;
+    uint32_t colorOff       = 0xFF222222;
+    uint32_t cx             = 1280;
+    uint32_t cy             = 200;
+    int      keyboardHeight = 200;   // keyboard height in px (used when waterfall on)
+    uint32_t midiHandle     = 0;
+
+    // Waterfall rows — [controller][note] brightness per historical frame
+    struct WFRow {
+        std::array<std::array<float, 128>, MAX_CONTROLLERS> b = {};
+    };
+    std::deque<WFRow> waterfall;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Colour helpers  (OBS stores color properties as ARGB uint32)
+// Property key arrays (used in defaults / create / update / properties)
+// ─────────────────────────────────────────────────────────────────────────────
+static const char *kPortKeys[4]  = { "slot_0_port",  "slot_1_port",  "slot_2_port",  "slot_3_port"  };
+static const char *kColorKeys[4] = { "slot_0_color", "slot_1_color", "slot_2_color", "slot_3_color" };
+
+static const uint32_t kDefaultColors[4] = {
+    0xFF44AAFF,   // slot 0 — blue
+    0xFFFF4444,   // slot 1 — red
+    0xFF44FF88,   // slot 2 — green
+    0xFFFFAA00,   // slot 3 — orange
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Colour helpers
 // ─────────────────────────────────────────────────────────────────────────────
 static void argb_to_vec4(uint32_t c, vec4 *out)
 {
@@ -64,19 +89,59 @@ static uint32_t lerp_argb(uint32_t a, uint32_t b, float t)
          |  l8( a     &0xFF, b     &0xFF);
 }
 
+// Blend all active controller colors for a given note.
+// Returns a color between colorOff and the weighted blend of active controllers.
+static uint32_t blendKeyColor(const PianoSource *s, int n, uint32_t offColor)
+{
+    float totalW = 0.0f, r = 0, g = 0, b = 0;
+    for (int k = 0; k < PianoSource::MAX_CONTROLLERS; ++k) {
+        if (s->controllers[k].portIndex < 0) continue;
+        float d = s->noteDecay[k][n];
+        if (d < 0.005f) continue;
+        uint32_t c = s->controllers[k].color;
+        r += ((c >> 16) & 0xFF) * d;
+        g += ((c >>  8) & 0xFF) * d;
+        b += ( c        & 0xFF) * d;
+        totalW += d;
+    }
+    if (totalW < 0.005f) return offColor;
+    float t = std::min(1.0f, totalW);
+    uint32_t avg = 0xFF000000u
+                 | ((uint32_t)(r / totalW) << 16)
+                 | ((uint32_t)(g / totalW) <<  8)
+                 |  (uint32_t)(b / totalW);
+    return lerp_argb(offColor, avg, t);
+}
+
+// Same blend for a waterfall row
+static uint32_t blendWFColor(const PianoSource *s, const PianoSource::WFRow &row, int n)
+{
+    float totalW = 0.0f, r = 0, g = 0, b = 0;
+    for (int k = 0; k < PianoSource::MAX_CONTROLLERS; ++k) {
+        float t = row.b[k][n];
+        if (t < 0.005f) continue;
+        uint32_t c = s->controllers[k].color;
+        r += ((c >> 16) & 0xFF) * t;
+        g += ((c >>  8) & 0xFF) * t;
+        b += ( c        & 0xFF) * t;
+        totalW += t;
+    }
+    if (totalW < 0.005f) return 0;  // transparent — skip draw
+    float ft = std::min(1.0f, totalW);
+    uint32_t avg = 0xFF000000u
+                 | ((uint32_t)(r / totalW) << 16)
+                 | ((uint32_t)(g / totalW) <<  8)
+                 |  (uint32_t)(b / totalW);
+    return lerp_argb(0xFF000000u, avg, ft);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// MIDI port helper — shared logic for create/update
-// Open the selected port; close if disabled (-1).
-// Skips the reopen if the port is already open and matches.
+// Open a MIDI port; never closes others — multiple ports coexist.
 // ─────────────────────────────────────────────────────────────────────────────
 static void apply_midi_port(int portIdx)
 {
-    auto &eng = MidiEngine::instance();
-    if (portIdx < 0) {
-        if (eng.isOpen()) eng.closePort();
-    } else if (portIdx != eng.currentPort() || !eng.isOpen()) {
-        eng.openPort(portIdx);
-    }
+    if (portIdx >= 0)
+        MidiEngine::instance().openPort(portIdx);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,27 +149,39 @@ static void apply_midi_port(int portIdx)
 // ─────────────────────────────────────────────────────────────────────────────
 static const char *piano_get_name(void *) { return obs_module_text("PianoSource.Name"); }
 
+static void load_settings(PianoSource *s, obs_data_t *settings)
+{
+    for (int k = 0; k < PianoSource::MAX_CONTROLLERS; ++k) {
+        s->controllers[k].portIndex = (int)obs_data_get_int(settings, kPortKeys[k]);
+        s->controllers[k].color     = (uint32_t)obs_data_get_int(settings, kColorKeys[k]);
+        apply_midi_port(s->controllers[k].portIndex);
+    }
+    s->keyMin         = (int)obs_data_get_int( settings, "key_min");
+    s->keyMax         = (int)obs_data_get_int( settings, "key_max");
+    s->showWaterfall  = obs_data_get_bool(      settings, "waterfall");
+    s->colorOff       = (uint32_t)obs_data_get_int(settings, "color_off");
+    s->cx             = (uint32_t)obs_data_get_int(settings, "width");
+    s->cy             = (uint32_t)obs_data_get_int(settings, "height");
+    s->keyboardHeight = (int)obs_data_get_int( settings, "keyboard_height");
+}
+
 static void *piano_create(obs_data_t *settings, obs_source_t *source)
 {
     (void)source;
-    auto *s          = new PianoSource{};
-    s->keyMin        = (int)obs_data_get_int( settings, "key_min");
-    s->keyMax        = (int)obs_data_get_int( settings, "key_max");
-    s->showWaterfall = obs_data_get_bool(     settings, "waterfall");
-    s->colorOn       = (uint32_t)obs_data_get_int(settings, "color_on");
-    s->colorOff      = (uint32_t)obs_data_get_int(settings, "color_off");
-    s->cx            = (uint32_t)obs_data_get_int(settings, "width");
-    s->cy            = (uint32_t)obs_data_get_int(settings, "height");
-    s->midiPort      = (int)obs_data_get_int(settings, "midi_port");
-
-    apply_midi_port(s->midiPort);
+    auto *s = new PianoSource{};
+    load_settings(s, settings);
 
     s->midiHandle = MidiEngine::instance().subscribe([s](const MidiEvent &ev) {
-        if (ev.type == MidiEventType::NoteOn) {
-            s->noteVelocity[ev.param1] = ev.param2;
-            s->noteDecay   [ev.param1] = 1.0f;
-        } else if (ev.type == MidiEventType::NoteOff) {
-            s->noteVelocity[ev.param1] = 0;
+        if (ev.type != MidiEventType::NoteOn && ev.type != MidiEventType::NoteOff) return;
+        if (ev.param1 >= 128) return;
+        for (int k = 0; k < PianoSource::MAX_CONTROLLERS; ++k) {
+            if (s->controllers[k].portIndex != ev.portIndex) continue;
+            if (ev.type == MidiEventType::NoteOn) {
+                s->noteHeld [k][ev.param1] = ev.param2;
+                s->noteDecay[k][ev.param1] = 1.0f;
+            } else {
+                s->noteHeld[k][ev.param1] = 0;
+            }
         }
     });
 
@@ -121,61 +198,73 @@ static void piano_destroy(void *data)
 
 static void piano_defaults(obs_data_t *settings)
 {
-    obs_data_set_default_int( settings, "midi_port",  -1);
-    obs_data_set_default_int( settings, "key_min",    21);
-    obs_data_set_default_int( settings, "key_max",    108);
-    obs_data_set_default_bool(settings, "waterfall",  false);
-    obs_data_set_default_int( settings, "color_on",   0xFF44AAFF);
-    obs_data_set_default_int( settings, "color_off",  0xFF222222);
-    obs_data_set_default_int( settings, "width",      1280);
-    obs_data_set_default_int( settings, "height",     200);
+    for (int k = 0; k < 4; ++k) {
+        obs_data_set_default_int(settings, kPortKeys[k],  -1);
+        obs_data_set_default_int(settings, kColorKeys[k], (int64_t)kDefaultColors[k]);
+    }
+    obs_data_set_default_int( settings, "key_min",         21);
+    obs_data_set_default_int( settings, "key_max",         108);
+    obs_data_set_default_bool(settings, "waterfall",       false);
+    obs_data_set_default_int( settings, "color_off",       (int64_t)0xFF222222u);
+    obs_data_set_default_int( settings, "keyboard_height", 200);
+    obs_data_set_default_int( settings, "width",           1280);
+    obs_data_set_default_int( settings, "height",          200);
+}
+
+// Populate a MIDI port list property from current available ports
+static void populate_port_list(obs_property_t *lst)
+{
+    obs_property_list_clear(lst);
+    obs_property_list_add_int(lst, "Disabled", -1);
+    auto ports = MidiEngine::instance().portNames();
+    for (int i = 0; i < (int)ports.size(); ++i)
+        obs_property_list_add_int(lst, ports[i].c_str(), i);
 }
 
 static obs_properties_t *piano_properties(void *)
 {
     obs_properties_t *p = obs_properties_create();
 
-    // MIDI device selection — always at the top
-    obs_property_t *port_list = obs_properties_add_list(p, "midi_port",
-        "MIDI Input Device", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-    obs_property_list_add_int(port_list, "Disabled", -1);
-    auto ports = MidiEngine::instance().portNames();
-    for (int i = 0; i < (int)ports.size(); ++i)
-        obs_property_list_add_int(port_list, ports[i].c_str(), i);
+    static const char *slotLabels[4] = {
+        "Controller 1 — Device",
+        "Controller 2 — Device",
+        "Controller 3 — Device",
+        "Controller 4 — Device",
+    };
+    static const char *colorLabels[4] = {
+        "Controller 1 — Colour",
+        "Controller 2 — Colour",
+        "Controller 3 — Colour",
+        "Controller 4 — Colour",
+    };
 
-    obs_properties_add_button(p, "midi_refresh", "Refresh Devices",
+    for (int k = 0; k < 4; ++k) {
+        obs_property_t *lst = obs_properties_add_list(p, kPortKeys[k],
+            slotLabels[k], OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+        populate_port_list(lst);
+        obs_properties_add_color(p, kColorKeys[k], colorLabels[k]);
+    }
+
+    obs_properties_add_button(p, "midi_refresh", "Refresh MIDI Devices",
         [](obs_properties_t *pp, obs_property_t *, void *) -> bool {
-            obs_property_t *lst = obs_properties_get(pp, "midi_port");
-            obs_property_list_clear(lst);
-            obs_property_list_add_int(lst, "Disabled", -1);
-            auto ps = MidiEngine::instance().portNames();
-            for (int i = 0; i < (int)ps.size(); ++i)
-                obs_property_list_add_int(lst, ps[i].c_str(), i);
+            for (int k = 0; k < 4; ++k)
+                populate_port_list(obs_properties_get(pp, kPortKeys[k]));
             return true;
         });
 
-    obs_properties_add_int(  p, "key_min",   "Lowest key (MIDI #)",  0, 127, 1);
-    obs_properties_add_int(  p, "key_max",   "Highest key (MIDI #)", 0, 127, 1);
-    obs_properties_add_bool( p, "waterfall", "Falling note waterfall");
-    obs_properties_add_color(p, "color_on",  "Active key colour");
-    obs_properties_add_color(p, "color_off", "Resting key colour");
-    obs_properties_add_int(  p, "width",     "Width (px)",  64, 7680, 1);
-    obs_properties_add_int(  p, "height",    "Height (px)", 32, 4320, 1);
+    obs_properties_add_int(  p, "key_min",         "Lowest key (MIDI #)",      0, 127, 1);
+    obs_properties_add_int(  p, "key_max",         "Highest key (MIDI #)",     0, 127, 1);
+    obs_properties_add_color(p, "color_off",       "Resting key colour");
+    obs_properties_add_bool( p, "waterfall",       "Falling note waterfall");
+    obs_properties_add_int(  p, "keyboard_height", "Keyboard height (px)",    32, 800, 8);
+    obs_properties_add_int(  p, "width",           "Canvas width (px)",       64, 7680, 1);
+    obs_properties_add_int(  p, "height",          "Canvas height (px)",      32, 4320, 1);
     return p;
 }
 
 static void piano_update(void *data, obs_data_t *settings)
 {
-    auto *s          = static_cast<PianoSource *>(data);
-    s->keyMin        = (int)obs_data_get_int( settings, "key_min");
-    s->keyMax        = (int)obs_data_get_int( settings, "key_max");
-    s->showWaterfall = obs_data_get_bool(     settings, "waterfall");
-    s->colorOn       = (uint32_t)obs_data_get_int(settings, "color_on");
-    s->colorOff      = (uint32_t)obs_data_get_int(settings, "color_off");
-    s->cx            = (uint32_t)obs_data_get_int(settings, "width");
-    s->cy            = (uint32_t)obs_data_get_int(settings, "height");
-    s->midiPort      = (int)obs_data_get_int(settings, "midi_port");
-    apply_midi_port(s->midiPort);
+    load_settings(static_cast<PianoSource *>(data), settings);
 }
 
 static void piano_tick(void *data, float seconds)
@@ -184,16 +273,21 @@ static void piano_tick(void *data, float seconds)
     MidiEngine::instance().drainQueue();
 
     constexpr float kDecayRate = 3.0f;
-    for (int i = 0; i < 128; ++i) {
-        if (s->noteVelocity[i] == 0 && s->noteDecay[i] > 0.0f)
-            s->noteDecay[i] = std::max(0.0f, s->noteDecay[i] - kDecayRate * seconds);
+    for (int k = 0; k < PianoSource::MAX_CONTROLLERS; ++k) {
+        for (int i = 0; i < 128; ++i) {
+            if (s->noteHeld[k][i] == 0 && s->noteDecay[k][i] > 0.0f)
+                s->noteDecay[k][i] = std::max(0.0f, s->noteDecay[k][i] - kDecayRate * seconds);
+        }
     }
 
     if (s->showWaterfall) {
-        std::array<float, 128> row{};
-        for (int n = 0; n < 128; ++n)
-            row[n] = (s->noteVelocity[n] > 0) ? 1.0f : s->noteDecay[n];
-        s->waterfall.push_back(row);
+        PianoSource::WFRow row;
+        for (int k = 0; k < PianoSource::MAX_CONTROLLERS; ++k) {
+            if (s->controllers[k].portIndex < 0) continue;
+            for (int n = 0; n < 128; ++n)
+                row.b[k][n] = (s->noteHeld[k][n] > 0) ? 1.0f : s->noteDecay[k][n];
+        }
+        s->waterfall.push_back(std::move(row));
         while ((int)s->waterfall.size() > kWaterfallMax)
             s->waterfall.pop_front();
     }
@@ -205,11 +299,19 @@ static uint32_t piano_get_height(void *d) { return static_cast<PianoSource*>(d)-
 // ─────────────────────────────────────────────────────────────────────────────
 // Render
 //
-// NOTE: OBS calls video_render from within its own compositing pass, so an
-// effect is already active when we arrive here. gs_effect_loop() checks an
-// "effect_in_use" guard and prints "An effect is already active" if you nest
-// it. Use gs_technique_begin/end directly to bypass that guard — perfectly
-// legal from a render callback and how many built-in OBS sources work.
+// Layout when waterfall is ON:
+//   y = 0 .. (H - keyboardHeight)  ← waterfall (falling notes)
+//   y = (H - keyboardHeight) .. H  ← keyboard
+//
+// Layout when waterfall is OFF:
+//   y = 0 .. H  ← keyboard fills entire canvas
+//
+// Set canvas height = scene height and keyboardHeight = desired key strip
+// height. The source can then be placed full-screen; the keys sit at the
+// bottom and the waterfall extends all the way to the top of the scene.
+//
+// gs_effect_loop() cannot be called inside video_render — OBS already has
+// an effect active when it invokes us. Use gs_technique_begin/end directly.
 // ─────────────────────────────────────────────────────────────────────────────
 static void piano_render(void *data, gs_effect_t *effect)
 {
@@ -227,14 +329,16 @@ static void piano_render(void *data, gs_effect_t *effect)
         if (!kIsBlack[n % 12]) ++numWhite;
     if (numWhite == 0) return;
 
-    // Geometry
-    const float kbH = s->showWaterfall ? H * 0.38f : H;  // keyboard height
-    const float kbY = H - kbH;                            // keyboard top y
-    const float wkw = W / (float)numWhite;                // white key width
+    // Layout
+    const float kbH = s->showWaterfall
+                      ? std::min((float)s->keyboardHeight, H)
+                      : H;
+    const float kbY = H - kbH;   // top of keyboard strip
+    const float wkw = W / (float)numWhite;
     const float bkw = wkw * kBlackW;
     const float bkh = kbH * kBlackH;
 
-    // Precompute each key's x and width once
+    // Precompute key geometry
     struct KeyGeom { float x, w; bool valid; };
     KeyGeom geom[128]{};
     {
@@ -244,23 +348,19 @@ static void piano_render(void *data, gs_effect_t *effect)
                 geom[n] = { (float)wki * wkw, wkw - 1.0f, true };
                 ++wki;
             } else {
-                // Center on boundary between left and right white keys.
-                if (wki == 0) {
-                    geom[n] = { 0, 0, false };  // no left sibling in range
-                } else {
-                    geom[n] = { (float)wki * wkw - bkw * 0.5f, bkw, true };
-                }
+                geom[n] = wki == 0
+                    ? KeyGeom{ 0, 0, false }
+                    : KeyGeom{ (float)wki * wkw - bkw * 0.5f, bkw, true };
             }
         }
     }
 
-    // Begin the SOLID effect technique directly (no gs_effect_loop nesting)
+    // Begin SOLID technique once; all draws happen within the single pass
     gs_effect_t    *solid      = obs_get_base_effect(OBS_EFFECT_SOLID);
     gs_eparam_t    *colorParam = gs_effect_get_param_by_name(solid, "color");
     gs_technique_t *tech       = gs_effect_get_technique(solid, "Solid");
     size_t          passes     = gs_technique_begin(tech);
 
-    // drawRect: set color uniform and draw; called within the outer pass loop
     auto drawRect = [&](float x, float y, float w, float h, uint32_t argb) {
         if (w < 1.0f || h < 1.0f) return;
         vec4 col;
@@ -275,37 +375,37 @@ static void piano_render(void *data, gs_effect_t *effect)
     for (size_t p = 0; p < passes; ++p) {
         gs_technique_begin_pass(tech, p);
 
-        // ── Waterfall (falling notes above keyboard) ─────────────────────────
-        if (s->showWaterfall && !s->waterfall.empty()) {
+        // ── Waterfall ───────────────────────────────────────────────────────
+        if (s->showWaterfall && !s->waterfall.empty() && kbY > 1.0f) {
             const int   rows = (int)s->waterfall.size();
             const float rowH = kbY / (float)rows;
 
-            for (int n = keyMin; n <= keyMax; ++n) {
-                if (!geom[n].valid) continue;
-                for (int i = 0; i < rows; ++i) {
-                    float t = s->waterfall[i][n];
-                    if (t < 0.005f) continue;
-                    // i=0 oldest → top (y=0); i=rows-1 newest → bottom (y≈kbY)
-                    float ry = (float)i * rowH;
-                    drawRect(geom[n].x, ry, geom[n].w, rowH + 1.0f,
-                             lerp_argb(0xFF000000u, s->colorOn, t));
+            for (int i = 0; i < rows; ++i) {
+                float ry = (float)i * rowH;  // i=0 oldest → top
+                const auto &row = s->waterfall[i];
+
+                for (int n = keyMin; n <= keyMax; ++n) {
+                    if (!geom[n].valid) continue;
+                    uint32_t c = blendWFColor(s, row, n);
+                    if ((c >> 24) < 4) continue;  // essentially transparent
+                    drawRect(geom[n].x, ry, geom[n].w, rowH + 1.0f, c);
                 }
             }
         }
 
-        // ── White keys ───────────────────────────────────────────────────────
+        // ── White keys ──────────────────────────────────────────────────────
         for (int n = keyMin; n <= keyMax; ++n) {
             if (kIsBlack[n % 12] || !geom[n].valid) continue;
             drawRect(geom[n].x, kbY, geom[n].w, kbH,
-                     lerp_argb(s->colorOff, s->colorOn, s->noteDecay[n]));
+                     blendKeyColor(s, n, s->colorOff));
         }
 
-        // ── Black keys (on top of white keys) ────────────────────────────────
+        // ── Black keys (drawn on top) ────────────────────────────────────────
         const uint32_t blackOff = lerp_argb(s->colorOff, 0xFF000000u, 0.55f);
         for (int n = keyMin; n <= keyMax; ++n) {
             if (!kIsBlack[n % 12] || !geom[n].valid) continue;
             drawRect(geom[n].x, kbY, geom[n].w, bkh,
-                     lerp_argb(blackOff, s->colorOn, s->noteDecay[n]));
+                     blendKeyColor(s, n, blackOff));
         }
 
         gs_technique_end_pass(tech);

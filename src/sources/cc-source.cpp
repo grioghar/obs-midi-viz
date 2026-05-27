@@ -42,12 +42,8 @@ struct CcSource {
 // ─────────────────────────────────────────────────────────────────────────────
 static void apply_midi_port(int portIdx)
 {
-    auto &eng = MidiEngine::instance();
-    if (portIdx < 0) {
-        if (eng.isOpen()) eng.closePort();
-    } else if (portIdx != eng.currentPort() || !eng.isOpen()) {
-        eng.openPort(portIdx);
-    }
+    if (portIdx >= 0)
+        MidiEngine::instance().openPort(portIdx);
 }
 
 static const char *cc_get_name(void *) { return obs_module_text("CcSource.Name"); }
@@ -65,6 +61,7 @@ static void *cc_create(obs_data_t *settings, obs_source_t *source)
     apply_midi_port(s->midiPort);
 
     s->midiHandle = MidiEngine::instance().subscribe([s](const MidiEvent &ev) {
+        if (s->midiPort >= 0 && ev.portIndex != s->midiPort) return;
         if (ev.type != MidiEventType::ControlChange) return;
         for (int i = 0; i < CcSource::MAX_LANES; ++i) {
             if (s->ccNumbers[i] == ev.param1)

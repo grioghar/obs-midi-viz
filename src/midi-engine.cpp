@@ -1,86 +1,128 @@
 #include "midi-engine.hpp"
 #include "plugin-support.h"
-#include <stdexcept>
+#include <algorithm>
 
 // ─────────────────────────────────────────────────────────────────────────────
 MidiEngine::MidiEngine()
 {
     try {
-        m_midi = std::make_unique<RtMidiIn>(
-            RtMidi::UNSPECIFIED, "obs-midi-viz");
-        m_midi->ignoreTypes(false, true, true); // receive SysEx off, timing off
-        MIDI_LOG_INFO("RtMidi backend: %s", m_midi->getApiDisplayName(
-            m_midi->getCurrentApi()).c_str());
+        m_probe = std::make_unique<RtMidiIn>(RtMidi::UNSPECIFIED, "obs-midi-viz-probe");
+        MIDI_LOG_INFO("RtMidi backend: %s",
+            m_probe->getApiDisplayName(m_probe->getCurrentApi()).c_str());
     } catch (RtMidiError &e) {
-        MIDI_LOG_ERR("RtMidi init failed: %s", e.getMessage().c_str());
+        MIDI_LOG_ERR("RtMidi probe init failed: %s", e.getMessage().c_str());
     }
 }
 
 MidiEngine::~MidiEngine()
 {
-    closePort();
+    closeAll();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 std::vector<std::string> MidiEngine::portNames()
 {
     std::vector<std::string> names;
-    if (!m_midi) return names;
-    unsigned int count = m_midi->getPortCount();
+    if (!m_probe) return names;
+    unsigned int count = m_probe->getPortCount();
     names.reserve(count);
     for (unsigned int i = 0; i < count; ++i)
-        names.push_back(m_midi->getPortName(i));
+        names.push_back(m_probe->getPortName(i));
     return names;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// openPort — idempotent; each portIndex gets its own RtMidiIn instance so
+// multiple devices can be open simultaneously without closing each other.
+// The PortCbData struct lives inside std::map, whose nodes are pointer-stable
+// after insertion — safe to pass &cbData to RtMidi as the callback userData.
+// ─────────────────────────────────────────────────────────────────────────────
 bool MidiEngine::openPort(int portIndex)
 {
-    closePort();
-    if (!m_midi) return false;
+    std::lock_guard<std::mutex> lk(m_portsMutex);
+
+    if (m_ports.count(portIndex))
+        return true;  // already open — idempotent
 
     try {
-        if (portIndex < 0) {
-            // Virtual port — useful for DAW routing
-            m_midi->openVirtualPort("obs-midi-viz");
-            MIDI_LOG_INFO("Opened virtual MIDI port");
-        } else {
-            m_midi->openPort((unsigned int)portIndex, "obs-midi-viz");
-            MIDI_LOG_INFO("Opened MIDI port %d: %s",
-                portIndex, m_midi->getPortName(portIndex).c_str());
-        }
-        m_midi->setCallback(&MidiEngine::rtmidiCallback, this);
-        m_portIndex = portIndex;
-        m_open.store(true);
+        // Insert default-constructed entry first so cbData is in its final
+        // stable map-node address before we hand the pointer to RtMidi.
+        auto &op        = m_ports[portIndex];
+        op.cbData       = { this, portIndex };
+        op.midi         = std::make_unique<RtMidiIn>(RtMidi::UNSPECIFIED, "obs-midi-viz");
+        op.midi->ignoreTypes(false, true, true); // pass SysEx; drop timing/active-sense
+
+        op.midi->openPort((unsigned int)portIndex, "obs-midi-viz");
+        op.midi->setCallback(&MidiEngine::rtmidiCallback, &op.cbData);
+
+        std::string name = m_probe ? m_probe->getPortName(portIndex) : "?";
+        MIDI_LOG_INFO("Opened MIDI port %d: %s", portIndex, name.c_str());
         return true;
+
     } catch (RtMidiError &e) {
-        MIDI_LOG_ERR("Failed to open port %d: %s",
-            portIndex, e.getMessage().c_str());
+        m_ports.erase(portIndex);
+        MIDI_LOG_ERR("Failed to open MIDI port %d: %s", portIndex, e.getMessage().c_str());
         return false;
     }
 }
 
-void MidiEngine::closePort()
+void MidiEngine::closePort(int portIndex)
 {
-    if (m_open.load() && m_midi) {
-        m_midi->cancelCallback();
-        m_midi->closePort();
-        m_open.store(false);
-        MIDI_LOG_INFO("MIDI port closed");
+    std::lock_guard<std::mutex> lk(m_portsMutex);
+    auto it = m_ports.find(portIndex);
+    if (it == m_ports.end()) return;
+    // cancelCallback() before erasing so the RtMidi background thread
+    // stops firing before the cbData pointer becomes dangling.
+    it->second.midi->cancelCallback();
+    it->second.midi->closePort();
+    m_ports.erase(it);
+    MIDI_LOG_INFO("Closed MIDI port %d", portIndex);
+}
+
+void MidiEngine::closeAll()
+{
+    std::lock_guard<std::mutex> lk(m_portsMutex);
+    for (auto &[idx, op] : m_ports) {
+        op.midi->cancelCallback();
+        op.midi->closePort();
     }
+    m_ports.clear();
+}
+
+bool MidiEngine::isOpen() const
+{
+    std::lock_guard<std::mutex> lk(m_portsMutex);
+    return !m_ports.empty();
+}
+
+bool MidiEngine::isPortOpen(int p) const
+{
+    std::lock_guard<std::mutex> lk(m_portsMutex);
+    return m_ports.count(p) > 0;
+}
+
+int MidiEngine::currentPort() const
+{
+    std::lock_guard<std::mutex> lk(m_portsMutex);
+    return m_ports.empty() ? -1 : m_ports.begin()->first;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Called on RtMidi's background thread — only push to queue, never render
+// RtMidi callback — runs on RtMidi's background thread.
+// Only enqueues; never calls subscribers directly.
+// userData points to a PortCbData stored inside m_ports (pointer-stable).
 // ─────────────────────────────────────────────────────────────────────────────
 void MidiEngine::rtmidiCallback(double timestamp,
                                   std::vector<unsigned char> *msg,
                                   void *userData)
 {
-    if (!msg || msg->size() < 2) return;
-    auto *self = static_cast<MidiEngine *>(userData);
+    if (!msg || msg->size() < 2 || !userData) return;
+    auto *pd = static_cast<PortCbData *>(userData);
 
     MidiEvent ev;
     ev.timestamp = timestamp;
+    ev.portIndex = pd->portIndex;
+
     uint8_t status = (*msg)[0];
     uint8_t type   = status & 0xF0;
     ev.channel     = status & 0x0F;
@@ -91,7 +133,7 @@ void MidiEngine::rtmidiCallback(double timestamp,
     case 0x80: ev.type = MidiEventType::NoteOff;       break;
     case 0x90:
         ev.type = (ev.param2 == 0)
-            ? MidiEventType::NoteOff   // velocity 0 = note-off convention
+            ? MidiEventType::NoteOff   // velocity-0 = note-off convention
             : MidiEventType::NoteOn;
         break;
     case 0xB0: ev.type = MidiEventType::ControlChange; break;
@@ -99,16 +141,16 @@ void MidiEngine::rtmidiCallback(double timestamp,
     default:   ev.type = MidiEventType::Other;         break;
     }
 
-    std::lock_guard<std::mutex> lk(self->m_queueMutex);
-    self->m_queue.push(ev);
+    std::lock_guard<std::mutex> lk(pd->engine->m_queueMutex);
+    pd->engine->m_queue.push(ev);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Called from OBS render thread — dispatch queued events to all subscribers
+// drainQueue — called from the OBS render thread via video_tick.
+// Swaps the queue under lock then dispatches without holding the lock.
 // ─────────────────────────────────────────────────────────────────────────────
 void MidiEngine::drainQueue()
 {
-    // Swap to a local queue to minimise lock hold time
     std::queue<MidiEvent> local;
     {
         std::lock_guard<std::mutex> lk(m_queueMutex);
