@@ -130,23 +130,40 @@ target_compile_definitions(obs-midi-viz PRIVATE
   PLUGIN_VERSION="${PROJECT_VERSION}"
 )
 
-if(APPLE)
-  set_target_properties(obs-midi-viz PROPERTIES
-    BUNDLE TRUE
-    BUNDLE_EXTENSION plugin
+# ─────────────────────────────────────────────────────────────────────────────
+# Install — layout matches OBS's plugin search paths so the zip/tar can be
+# dropped directly into the right place with no manual file shuffling.
+#
+#   Windows : extract zip  → C:\Program Files\obs-studio\
+#             (obs-plugins\64bit\  +  data\obs-plugins\obs-midi-viz\)
+#
+#   macOS   : copy obs-midi-viz/ folder
+#             → ~/Library/Application Support/obs-studio/plugins/
+#             (obs-midi-viz/bin/  +  obs-midi-viz/data/)
+#
+#   Linux   : copy obs-midi-viz/ folder
+#             → ~/.config/obs-studio/plugins/
+#             (obs-midi-viz/bin/64bit/  +  obs-midi-viz/data/)
+# ─────────────────────────────────────────────────────────────────────────────
+if(WIN32)
+  install(TARGETS obs-midi-viz
+    LIBRARY DESTINATION "obs-plugins/64bit"
+  )
+  install(DIRECTORY data/
+    DESTINATION "data/obs-plugins/obs-midi-viz"
+  )
+elseif(APPLE)
+  install(TARGETS obs-midi-viz
+    LIBRARY DESTINATION "obs-midi-viz/bin"
+  )
+  install(DIRECTORY data/
+    DESTINATION "obs-midi-viz/data"
+  )
+else()
+  install(TARGETS obs-midi-viz
+    LIBRARY DESTINATION "obs-midi-viz/bin/64bit"
+  )
+  install(DIRECTORY data/
+    DESTINATION "obs-midi-viz/data"
   )
 endif()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Install
-# ─────────────────────────────────────────────────────────────────────────────
-include(GNUInstallDirs)
-
-install(TARGETS obs-midi-viz
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/obs-plugins"
-  BUNDLE  DESTINATION "obs-plugins"
-)
-
-install(DIRECTORY data/
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/obs/obs-plugins/obs-midi-viz"
-)
