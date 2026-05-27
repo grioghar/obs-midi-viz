@@ -341,16 +341,22 @@ audio waveforms, track titles, playhead position, beat-grid alignment.
 
 Additional targets: DDJ-400, DDJ-REV5, Denon SC Live series, Rane Seventy-Two.
 
-#### 4e — Synthesizer patch displays 🔜
+### Phase 5 — CC Lanes renderer ✅
+Vertical bar graph per CC lane with exponential smoothing, numeric value overlay
+(MIDI 0–127), configurable CC assignments, peak-hold indicator with 1.5 s hold
+then gravity decay, and a two-tone gradient fill that shifts hot (orange → red)
+when a lane exceeds 88 % of its range. Up to 8 lanes; tick marks at 25 / 50 / 75 %.
+
+### Phase 6 — Synthesizer Patch Displays 🔜
 
 Per-synthesizer panel recreation that reads live parameter state via MIDI
-SysEx and displays it exactly as the hardware's own screen does.
+SysEx and renders it exactly as the hardware's own screen — patch architecture
+fully visible at a glance.
 
 **Initial target: Behringer DeepMind 12**
 
-The DM12 sends a SysEx parameter-change message every time you touch any
-control (CC, NRPN, or single-parameter SysEx depending on the control),
-and responds to a full patch dump request with a complete SysEx block
+The DM12 sends a SysEx parameter-change message every time any control is
+touched, and responds to a full patch dump request with a complete SysEx block
 (documented in the DM12 MIDI implementation chart).
 
 Planned display panels:
@@ -364,16 +370,12 @@ Planned display panels:
 Additional targets: Roland JD-Xi, Korg Minilogue XD, Sequential Prophet-5
 (all publish MIDI SysEx specs).
 
-### Phase 5 — CC Lanes renderer 🔜
-Actual vertical bar graph per CC lane with animated smoothing, numeric value
-overlay, and configurable CC assignments per lane.
-
-### Phase 6 — Polish 🔜
+### Phase 7 — Polish 🔜
 CPack installers (NSIS for Windows, macOS pkg/dmg, Linux .deb); OBS source icons;
 code signing + notarization for macOS (eliminates xattr requirement);
 per-scene preset save/restore; MIDI channel filtering.
 
-### Phase 7 — DAW Integration 🔜
+### Phase 8 — DAW Integration 🔜
 
 Bidirectional state bridge between obs-midi-viz and host DAW software.
 Rather than reacting only to raw MIDI bytes, Phase 7 lets the plugin read
