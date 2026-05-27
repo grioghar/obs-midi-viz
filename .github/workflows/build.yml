@@ -214,7 +214,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: obs-install
-          key: obs-${{ env.OBS_VERSION }}-win-x64-v2
+          key: obs-${{ env.OBS_VERSION }}-win-x64-v3
 
       - name: Clone OBS source
         if: steps.cache-obs.outputs.cache-hit != 'true'
@@ -222,21 +222,12 @@ jobs:
           git clone --depth 1 --branch $env:OBS_VERSION `
             https://github.com/obsproject/obs-studio.git obs-source
 
-      - name: Install OBS build deps (vcpkg)
-        if: steps.cache-obs.outputs.cache-hit != 'true'
-        run: |
-          # vcpkg is pre-installed on windows-2022 runners at C:\vcpkg
-          vcpkg install `
-            ffmpeg:x64-windows `
-            zlib:x64-windows `
-            curl:x64-windows `
-            jansson:x64-windows `
-            --triplet x64-windows
-          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
-
       - name: Build libobs from source
         if: steps.cache-obs.outputs.cache-hit != 'true'
         run: |
+          # No vcpkg — OBS's BuildSpec.cmake auto-downloads its own obs-deps
+          # bundle (same mechanism that works on macOS). Passing the toolchain
+          # file would intercept every find_package() and prevent that.
           cmake -B obs-build -S obs-source `
             -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
@@ -246,8 +237,6 @@ jobs:
             -DENABLE_BROWSER=OFF `
             -DENABLE_WEBSOCKET=OFF `
             -DENABLE_UPDATER=OFF `
-            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/obs-install"
 
           cmake --build obs-build --config Release --target libobs --parallel
