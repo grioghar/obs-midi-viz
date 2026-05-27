@@ -1,0 +1,68 @@
+﻿<?xml version='1.0' encoding='UTF-8'?>
+<svg width='480' height='480' viewBox='0 0 480 480' xmlns='http://www.w3.org/2000/svg'>
+<defs>
+  <radialGradient id='hg' cx='50%' cy='50%' r='50%'>
+    <stop offset='0'   stop-color='#ffffff' stop-opacity='0.18'/>
+    <stop offset='100%' stop-color='#ffffff' stop-opacity='0'/>
+  </radialGradient>
+</defs>
+<rect width='480' height='480' fill='#080808'/>
+<rect x='14.00' y='14.00' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='15.00' y='15.00' width='94.50' height='94.50' fill='#FF3300' rx='4'/>
+<rect x='15.00' y='15.00' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='62.25' y='84.93' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Bass2</text>
+<rect x='132.50' y='14.00' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='133.50' y='15.00' width='94.50' height='94.50' fill='#AD2807' rx='4'/>
+<rect x='133.50' y='15.00' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='180.75' y='84.93' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Bass1</text>
+<rect x='251.00' y='14.00' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='252.00' y='15.00' width='94.50' height='94.50' fill='#271612' rx='4'/>
+<rect x='252.00' y='15.00' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='299.25' y='84.93' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Rimshot</text>
+<rect x='369.50' y='14.00' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='370.50' y='15.00' width='94.50' height='94.50' fill='#FF3300' rx='4'/>
+<rect x='370.50' y='15.00' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='417.75' y='84.93' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Snare</text>
+<rect x='14.00' y='132.50' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='15.00' y='133.50' width='94.50' height='94.50' fill='#141414' rx='4'/>
+<text x='62.25' y='203.43' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Clap</text>
+<rect x='132.50' y='132.50' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='133.50' y='133.50' width='94.50' height='94.50' fill='#4F1C0F' rx='4'/>
+<rect x='133.50' y='133.50' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='180.75' y='203.43' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Snare2</text>
+<rect x='251.00' y='132.50' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='252.00' y='133.50' width='94.50' height='94.50' fill='#141414' rx='4'/>
+<text x='299.25' y='203.43' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Tom1</text>
+<rect x='369.50' y='132.50' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='370.50' y='133.50' width='94.50' height='94.50' fill='#FF3300' rx='4'/>
+<rect x='370.50' y='133.50' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='417.75' y='203.43' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>HH-C</text>
+<rect x='14.00' y='251.00' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='15.00' y='252.00' width='94.50' height='94.50' fill='#141414' rx='4'/>
+<text x='62.25' y='321.93' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Tom2</text>
+<rect x='132.50' y='251.00' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='133.50' y='252.00' width='94.50' height='94.50' fill='#371911' rx='4'/>
+<rect x='133.50' y='252.00' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='180.75' y='321.93' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>HH-P</text>
+<rect x='251.00' y='251.00' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='252.00' y='252.00' width='94.50' height='94.50' fill='#FF3300' rx='4'/>
+<rect x='252.00' y='252.00' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='299.25' y='321.93' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Tom3</text>
+<rect x='369.50' y='251.00' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='370.50' y='252.00' width='94.50' height='94.50' fill='#141414' rx='4'/>
+<text x='417.75' y='321.93' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>HH-O</text>
+<rect x='14.00' y='369.50' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='15.00' y='370.50' width='94.50' height='94.50' fill='#141414' rx='4'/>
+<text x='62.25' y='440.43' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Tom4</text>
+<rect x='132.50' y='369.50' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='133.50' y='370.50' width='94.50' height='94.50' fill='#141414' rx='4'/>
+<text x='180.75' y='440.43' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Tom5</text>
+<rect x='251.00' y='369.50' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='252.00' y='370.50' width='94.50' height='94.50' fill='#2C1712' rx='4'/>
+<rect x='252.00' y='370.50' width='94.50' height='94.50' fill='url(#hg)' rx='4'/>
+<text x='299.25' y='440.43' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Crash1</text>
+<rect x='369.50' y='369.50' width='96.50' height='96.50' fill='rgba(0,0,0,0.5)' rx='5'/>
+<rect x='370.50' y='370.50' width='94.50' height='94.50' fill='#141414' rx='4'/>
+<text x='417.75' y='440.43' fill='rgba(255,255,255,0.85)' font-family='Courier New,monospace' font-weight='bold' font-size='14px' text-anchor='middle'>Tom6</text>
+</svg>
+

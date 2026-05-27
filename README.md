@@ -18,6 +18,40 @@ All three sources are independent — add, resize, reorder, and show/hide them p
 
 ---
 
+## Previews
+
+### Keys (MIDI) — piano roll with waterfall, two controllers blending
+
+![Piano roll](docs/images/piano-roll.svg)
+
+*Blue = controller 1 (C-major chord); red = controller 2 (A-minor); purple blend where both play the same note (C4).*
+
+### Drums (MIDI) — Roland TR-808 preset
+
+![TR-808 drum grid](docs/images/drum-808.svg)
+
+*Warm orange hits on near-black wood-panel background. Bass1, Snare, Tom1, and Tom3 are currently triggered.*
+
+### Drums (MIDI) — Novation Launchpad X preset
+
+![Launchpad X drum grid](docs/images/drum-launchpad.svg)
+
+*8×8 rounded pads, purple RGB hits — matching the Launchpad X's native aesthetic.*
+
+### Drums (MIDI) — NI Maschine Studio preset
+
+![Maschine Studio drum grid](docs/images/drum-maschine.svg)
+
+*4×4 rounded pads, deep red hits on near-black panel.*
+
+### CC Lanes (MIDI)
+
+![CC Lanes](docs/images/cc-lanes.svg)
+
+*8 CC lanes (Mod, Breath, Expr, Sustain, Vol, Pan, Filter, Reso) at current values. Sustain (100%) glows cyan; low values render in standard blue.*
+
+---
+
 ## Installation
 
 Download the latest build artifacts from the [Actions tab](https://github.com/grioghar/obs-midi-viz/actions) (click the most recent green run → **Artifacts**).
@@ -29,6 +63,45 @@ Download the latest build artifacts from the [Actions tab](https://github.com/gr
 | **Linux (x86-64)** | `obs-midi-viz-linux-x86_64.tar.gz` | Extract, then copy `obs-midi-viz/` → `~/.config/obs-studio/plugins/` |
 
 Restart OBS, then add sources via **+** → **Keys (MIDI)** / **Drums (MIDI)** / **CC Lanes (MIDI)**.
+
+---
+
+## macOS: Gatekeeper & quarantine
+
+### Why OBS won't load the plugin out of the box
+
+macOS Gatekeeper automatically quarantines every file downloaded from the internet. A quarantined `.plugin` bundle is blocked from loading — OBS will silently skip it, and no source types will appear. This is **not** a bug in the plugin; it is standard macOS security behaviour for unsigned third-party code.
+
+### Quick fix (one-time terminal command)
+
+After copying the bundle to your plugins folder, run:
+
+```bash
+xattr -dr com.apple.quarantine \
+  ~/Library/Application\ Support/obs-studio/plugins/obs-midi-viz.plugin
+```
+
+`-d` removes the attribute, `-r` recurses into the bundle's subdirectories. You only need to do this once per install.
+
+Verify it worked — the following should print nothing:
+
+```bash
+xattr ~/Library/Application\ Support/obs-studio/plugins/obs-midi-viz.plugin
+```
+
+### Permanent fix — Apple code signing + notarization
+
+The root cause is that the plugin is not signed with an Apple-issued certificate. Until it is, every user who downloads it must run `xattr` manually. To remove that requirement permanently:
+
+| Step | What it involves | Cost |
+|---|---|---|
+| **Apple Developer account** | Required to obtain any Apple-issued signing certificate | $99 / year |
+| **Developer ID Application certificate** | The specific certificate type needed for software distributed outside the Mac App Store | Included with membership |
+| **Code-sign the bundle** | `codesign --sign "Developer ID Application: …" --deep --force --options runtime obs-midi-viz.plugin` | Free once enrolled |
+| **Notarize with Apple** | Submit the signed bundle to Apple's notarization service via `xcrun notarytool submit`; Apple scans for malware and returns a ticket | Free (a few minutes per submission) |
+| **Staple the ticket** | `xcrun stapler staple obs-midi-viz.plugin` — embeds the notarization result so macOS can verify offline | Free |
+
+Once signed, notarized, and stapled, macOS will trust the plugin on any machine without requiring `xattr`. The CI workflow can be updated to perform all of these steps automatically using secrets for the certificate and notarization credentials — let me know when you have a Developer ID certificate and I'll add that to the GitHub Actions build.
 
 ---
 
@@ -158,6 +231,9 @@ The `dist/` directory will contain the platform-appropriate layout ready to copy
 ```
 obs-midi-viz/
 ├── .github/workflows/build.yml     # CI matrix: Linux / macOS / Windows
+├── docs/
+│   ├── images/                     # SVG mockup images used in this README
+│   └── render/                     # gen-mockups.ps1 — regenerate the images
 ├── src/
 │   ├── plugin-main.cpp             # obs_module_load — registers all sources
 │   ├── plugin-support.h            # Logging macros (MIDI_LOG_INFO / ERR)
@@ -209,7 +285,8 @@ Actual vertical bar graph per CC lane with animated smoothing, numeric value
 overlay, and configurable CC assignments per lane.
 
 ### Phase 6 — Polish 🔜
-CPack installers (NSIS for Windows, macOS pkg/dmg); OBS source icons;
+CPack installers (NSIS for Windows, macOS pkg/dmg, Linux .deb); OBS source icons;
+code signing + notarization for macOS (eliminates xattr requirement);
 per-scene preset save/restore; MIDI channel filtering.
 
 ---

@@ -1,0 +1,47 @@
+﻿<?xml version='1.0' encoding='UTF-8'?>
+<svg width='560' height='140' viewBox='0 0 560 140' xmlns='http://www.w3.org/2000/svg'>
+<defs>
+  <linearGradient id='barGrad1' x1='0' y1='0' x2='0' y2='1'>
+    <stop offset='0' stop-color='#44ffcc'/>
+    <stop offset='1' stop-color='#0055aa'/>
+  </linearGradient>
+  <linearGradient id='barGrad0' x1='0' y1='0' x2='0' y2='1'>
+    <stop offset='0' stop-color='#00aaff'/>
+    <stop offset='1' stop-color='#0055aa'/>
+  </linearGradient>
+</defs>
+<rect width='560' height='140' fill='#111111'/>
+<rect x='2.00' y='6.00' width='66.00' height='108.00' fill='#1a1a30' rx='2'/>
+<rect x='2.00' y='34.08' width='66.00' height='79.92' fill='url(#barGrad0)' rx='2'/>
+<text x='35.00' y='129' fill='#8888bb' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>Mod</text>
+<text x='35.00' y='31.08' fill='rgba(200,220,255,0.75)' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>74</text>
+<rect x='72.00' y='6.00' width='66.00' height='108.00' fill='#1a1a30' rx='2'/>
+<rect x='72.00' y='83.76' width='66.00' height='30.24' fill='url(#barGrad0)' rx='2'/>
+<text x='105.00' y='129' fill='#8888bb' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>Breath</text>
+<text x='105.00' y='80.76' fill='rgba(200,220,255,0.75)' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>28</text>
+<rect x='142.00' y='6.00' width='66.00' height='108.00' fill='#1a1a30' rx='2'/>
+<rect x='142.00' y='14.64' width='66.00' height='99.36' fill='url(#barGrad1)' rx='2'/>
+<text x='175.00' y='129' fill='#8888bb' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>Expr</text>
+<text x='175.00' y='11.64' fill='rgba(200,220,255,0.75)' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>92</text>
+<rect x='212.00' y='6.00' width='66.00' height='108.00' fill='#1a1a30' rx='2'/>
+<rect x='212.00' y='6.00' width='66.00' height='108.00' fill='url(#barGrad1)' rx='2'/>
+<text x='245.00' y='129' fill='#8888bb' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>Sustain</text>
+<text x='245.00' y='3.00' fill='rgba(200,220,255,0.75)' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>100</text>
+<rect x='282.00' y='6.00' width='66.00' height='108.00' fill='#1a1a30' rx='2'/>
+<rect x='282.00' y='47.04' width='66.00' height='66.96' fill='url(#barGrad0)' rx='2'/>
+<text x='315.00' y='129' fill='#8888bb' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>Vol</text>
+<text x='315.00' y='44.04' fill='rgba(200,220,255,0.75)' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>62</text>
+<rect x='352.00' y='6.00' width='66.00' height='108.00' fill='#1a1a30' rx='2'/>
+<rect x='352.00' y='60.00' width='66.00' height='54.00' fill='url(#barGrad0)' rx='2'/>
+<text x='385.00' y='129' fill='#8888bb' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>Pan</text>
+<text x='385.00' y='57.00' fill='rgba(200,220,255,0.75)' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>50</text>
+<rect x='422.00' y='6.00' width='66.00' height='108.00' fill='#1a1a30' rx='2'/>
+<rect x='422.00' y='66.48' width='66.00' height='47.52' fill='url(#barGrad0)' rx='2'/>
+<text x='455.00' y='129' fill='#8888bb' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>Filter</text>
+<text x='455.00' y='63.48' fill='rgba(200,220,255,0.75)' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>44</text>
+<rect x='492.00' y='6.00' width='66.00' height='108.00' fill='#1a1a30' rx='2'/>
+<rect x='492.00' y='94.56' width='66.00' height='19.44' fill='url(#barGrad0)' rx='2'/>
+<text x='525.00' y='129' fill='#8888bb' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>Reso</text>
+<text x='525.00' y='91.56' fill='rgba(200,220,255,0.75)' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>18</text>
+</svg>
+
