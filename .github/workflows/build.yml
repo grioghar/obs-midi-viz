@@ -54,7 +54,7 @@ jobs:
 
       - name: Package
         run: |
-          cmake --install build --prefix dist
+          cmake --install build --prefix dist --component obs-midi-viz
           tar -czf ${{ env.PLUGIN_NAME }}-linux-x86_64.tar.gz -C dist .
 
       - name: Upload artifact
@@ -168,7 +168,7 @@ jobs:
 
       - name: Package
         run: |
-          cmake --install build --prefix dist
+          cmake --install build --prefix dist --component obs-midi-viz
           tar -czf ${{ env.PLUGIN_NAME }}-macos-arm64.tar.gz -C dist .
 
       - name: Upload artifact
@@ -295,7 +295,7 @@ jobs:
 
       - name: Package
         run: |
-          cmake --install build --prefix dist --config RelWithDebInfo
+          cmake --install build --prefix dist --config RelWithDebInfo --component obs-midi-viz
           Compress-Archive -Path dist\* `
             -DestinationPath "${{ env.PLUGIN_NAME }}-windows-x64.zip"
 

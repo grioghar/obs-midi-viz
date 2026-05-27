@@ -86,6 +86,10 @@ FetchContent_MakeAvailable(rtmidi)
 # in parent scope does not reliably propagate into FetchContent subprojects
 set_target_properties(rtmidi PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# Don't let cmake --install pull in RtMidi headers/cmake files — it's a
+# private build dependency, not something users of the plugin need.
+set_target_properties(rtmidi PROPERTIES EXPORT_NAME "rtmidi_internal")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Plugin target
 # NOTE: plugin-support.c is intentionally excluded — OBS_DECLARE_MODULE() and
@@ -130,6 +134,10 @@ target_compile_definitions(obs-midi-viz PRIVATE
   PLUGIN_VERSION="${PROJECT_VERSION}"
 )
 
+# Strip the default "lib" prefix so the output is obs-midi-viz.so / .dll,
+# not libobs-midi-viz.so — OBS expects the plain name.
+set_target_properties(obs-midi-viz PROPERTIES PREFIX "")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Install — layout matches OBS's plugin search paths so the zip/tar can be
 # dropped directly into the right place with no manual file shuffling.
@@ -148,22 +156,28 @@ target_compile_definitions(obs-midi-viz PRIVATE
 if(WIN32)
   install(TARGETS obs-midi-viz
     LIBRARY DESTINATION "obs-plugins/64bit"
+    COMPONENT obs-midi-viz
   )
   install(DIRECTORY data/
     DESTINATION "data/obs-plugins/obs-midi-viz"
+    COMPONENT obs-midi-viz
   )
 elseif(APPLE)
   install(TARGETS obs-midi-viz
     LIBRARY DESTINATION "obs-midi-viz/bin"
+    COMPONENT obs-midi-viz
   )
   install(DIRECTORY data/
     DESTINATION "obs-midi-viz/data"
+    COMPONENT obs-midi-viz
   )
 else()
   install(TARGETS obs-midi-viz
     LIBRARY DESTINATION "obs-midi-viz/bin/64bit"
+    COMPONENT obs-midi-viz
   )
   install(DIRECTORY data/
     DESTINATION "obs-midi-viz/data"
+    COMPONENT obs-midi-viz
   )
 endif()
