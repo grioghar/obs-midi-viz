@@ -938,15 +938,6 @@ static obs_properties_t *synth_properties(void *)
     obs_properties_add_int(props, "canvas_w", "Canvas width",  200, 3840, 1);
     obs_properties_add_int(props, "canvas_h", "Canvas height", 100, 2160, 1);
 
-    // Info text for patch dump
-    obs_properties_add_text(props, "_info",
-        "Send a Program Dump from your synth to populate the panel.\n"
-        "DeepMind 12: Global > MIDI > Bulk Dump\n"
-        "DSS-1: Global > SysEx Dump\n"
-        "QS7.1: Utility > MIDI > Bulk Dump\n"
-        "PSR-540: Function > MIDI > SysEx Transmit",
-        OBS_TEXT_INFO);
-
     return props;
 }
 
