@@ -8,10 +8,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // General MIDI percussion map (note 35–81); everything else is nullptr.
 // ─────────────────────────────────────────────────────────────────────────────
-// Used by Phase 4 pad-label rendering; suppress unused-variable warning for now
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((unused))
-#endif
 static const char *GM_DRUM_NAMES[128] = {
     nullptr,nullptr,nullptr,nullptr,nullptr, // 0–4
     nullptr,nullptr,nullptr,nullptr,nullptr, // 5–9
@@ -41,6 +37,71 @@ static const char *GM_DRUM_NAMES[128] = {
     nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,    // 118–123
     nullptr,nullptr,nullptr,nullptr,                    // 124–127
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3×5 pixel bitmap font — digits 0-9 (idx 0-9), A-Z (idx 10-35),
+// '-' (36), space (37).  Each byte = one row; bit2=left, bit1=centre, bit0=right.
+// ─────────────────────────────────────────────────────────────────────────────
+static const uint8_t kFont3x5[38][5] = {
+    {7,5,5,5,7}, // 0
+    {2,6,2,2,7}, // 1
+    {7,1,7,4,7}, // 2
+    {7,1,7,1,7}, // 3
+    {5,5,7,1,1}, // 4
+    {7,4,7,1,6}, // 5
+    {7,4,7,5,7}, // 6
+    {7,1,2,4,4}, // 7
+    {7,5,7,5,7}, // 8
+    {7,5,7,1,7}, // 9
+    {2,5,7,5,5}, // A
+    {6,5,6,5,6}, // B
+    {3,4,4,4,3}, // C
+    {6,5,5,5,6}, // D
+    {7,4,6,4,7}, // E
+    {7,4,6,4,4}, // F
+    {3,4,7,5,3}, // G
+    {5,5,7,5,5}, // H
+    {7,2,2,2,7}, // I
+    {1,1,1,5,2}, // J
+    {5,5,6,5,5}, // K
+    {4,4,4,4,7}, // L
+    {5,7,5,5,5}, // M
+    {5,5,7,5,5}, // N  (differs from M: mid-row filled vs top)
+    {2,5,5,5,2}, // O
+    {6,5,6,4,4}, // P
+    {2,5,5,7,3}, // Q
+    {6,5,6,5,5}, // R
+    {3,4,2,1,6}, // S
+    {7,2,2,2,2}, // T
+    {5,5,5,5,7}, // U
+    {5,5,5,2,2}, // V
+    {5,5,7,5,5}, // W  (accepted visual overlap with N; context disambiguates)
+    {5,5,2,5,5}, // X
+    {5,5,2,2,2}, // Y
+    {7,1,2,4,7}, // Z
+    {0,0,7,0,0}, // -
+    {0,0,0,0,0}, // space
+};
+
+static int fontIdx(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    char u = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
+    if (u >= 'A' && u <= 'Z') return 10 + (u - 'A');
+    if (c == '-') return 36;
+    return 37; // space / unknown
+}
+
+static uint32_t lerp_argb(uint32_t a, uint32_t b, float t)
+{
+    auto l8 = [t](uint32_t ca, uint32_t cb) -> uint32_t {
+        return (uint32_t)((float)ca + ((float)cb - (float)ca) * t);
+    };
+    return (l8((a>>24)&0xFF,(b>>24)&0xFF)<<24)
+         | (l8((a>>16)&0xFF,(b>>16)&0xFF)<<16)
+         | (l8((a>> 8)&0xFF,(b>> 8)&0xFF)<< 8)
+         |  l8( a     &0xFF, b     &0xFF);
+}
 
 struct DrumSource {
     static constexpr int MAX_PADS = 64;
@@ -204,37 +265,132 @@ static uint32_t drum_get_width (void *data) { return static_cast<DrumSource*>(da
 static uint32_t drum_get_height(void *data) { return static_cast<DrumSource*>(data)->cy; }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Render — placeholder solid-colour flash (Phase 4 will draw the actual grid)
+// Phase 4 render — actual pad grid with per-pad colour and bitmap labels.
+//
+// Layout:
+//   gap  = 5% of the smaller pad dimension (min 2 px)
+//   padW = (cx - gap*(cols+1)) / cols
+//   padH = (cy - gap*(rows+1)) / rows
+//
+// Each pad is lerped from colorIdle → colorHit by padFlash[i].
+// When showLabels is true, a GM drum name (or MIDI note number for
+// unmapped notes) is drawn in the bottom ~35% of each pad using the
+// 3×5 bitmap font, auto-scaled to fit.
+// Text colour is chosen by background luminance (white on dark, black on light).
+//
+// Uses gs_technique_begin/end directly — gs_effect_loop cannot be nested
+// inside OBS's compositing pass.
 // ─────────────────────────────────────────────────────────────────────────────
 static void drum_render(void *data, gs_effect_t *effect)
 {
     (void)effect;
     auto *s = static_cast<DrumSource *>(data);
 
-    float maxFlash = 0.0f;
-    for (int i = 0; i < DrumSource::MAX_PADS; ++i)
-        maxFlash = std::max(maxFlash, s->padFlash[i]);
+    const float W    = (float)s->cx;
+    const float H    = (float)s->cy;
+    const int   cols = std::max(1, s->columns);
+    const int   rows = std::max(1, s->rows);
 
-    uint32_t c = maxFlash > 0.01f ? s->colorHit : s->colorIdle;
+    // Gap between pads (proportional; at least 2 px)
+    const float minDim = std::min(W / cols, H / rows);
+    const float gap    = std::max(2.0f, minDim * 0.05f);
+    const float padW   = (W - gap * (cols + 1)) / cols;
+    const float padH   = (H - gap * (rows + 1)) / rows;
+    if (padW < 2.0f || padH < 2.0f) return;
 
-    gs_effect_t    *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
-    gs_eparam_t    *col   = gs_effect_get_param_by_name(solid, "color");
-    gs_technique_t *tech  = gs_effect_get_technique(solid, "Solid");
+    gs_effect_t    *solid      = obs_get_base_effect(OBS_EFFECT_SOLID);
+    gs_eparam_t    *colorParam = gs_effect_get_param_by_name(solid, "color");
+    gs_technique_t *tech       = gs_effect_get_technique(solid, "Solid");
+    size_t          passes     = gs_technique_begin(tech);
 
-    struct vec4 v4;
-    vec4_set(&v4,
-        ((c >> 16) & 0xFF) / 255.0f,
-        ((c >>  8) & 0xFF) / 255.0f,
-        ( c        & 0xFF) / 255.0f,
-        ((c >> 24) & 0xFF) / 255.0f);
-    gs_effect_set_vec4(col, &v4);
+    auto drawRect = [&](float x, float y, float w, float h, uint32_t argb) {
+        if (w < 1.0f || h < 1.0f) return;
+        struct vec4 col;
+        vec4_set(&col,
+            ((argb >> 16) & 0xFF) / 255.0f,
+            ((argb >>  8) & 0xFF) / 255.0f,
+            ( argb        & 0xFF) / 255.0f,
+            ((argb >> 24) & 0xFF) / 255.0f);
+        gs_effect_set_vec4(colorParam, &col);
+        gs_matrix_push();
+        gs_matrix_translate3f(x, y, 0.0f);
+        gs_draw_sprite(nullptr, 0, (uint32_t)w, (uint32_t)h);
+        gs_matrix_pop();
+    };
 
-    size_t passes = gs_technique_begin(tech);
-    for (size_t i = 0; i < passes; i++) {
-        gs_technique_begin_pass(tech, i);
-        gs_draw_sprite(nullptr, 0, s->cx, s->cy);
+    for (size_t p = 0; p < passes; ++p) {
+        gs_technique_begin_pass(tech, p);
+
+        const int total = cols * rows;
+        for (int i = 0; i < total && i < DrumSource::MAX_PADS; ++i) {
+            const int   col = i % cols;
+            const int   row = i / cols;
+            const float px  = gap + col * (padW + gap);
+            const float py  = gap + row * (padH + gap);
+
+            // ── Pad background ────────────────────────────────────────────
+            const float t = s->padFlash[i];
+            const uint32_t padColor = lerp_argb(s->colorIdle, s->colorHit, t);
+            drawRect(px, py, padW, padH, padColor);
+
+            // ── Label ─────────────────────────────────────────────────────
+            if (!s->showLabels || s->padNote[i] < 0) continue;
+
+            char label[16] = {};
+            int  note = s->padNote[i];
+            if (note < 128 && GM_DRUM_NAMES[note])
+                snprintf(label, sizeof(label), "%s", GM_DRUM_NAMES[note]);
+            else
+                snprintf(label, sizeof(label), "%d", note);
+            int len = (int)strlen(label);
+            if (len == 0) continue;
+
+            // Pick scale so the label fits in 80% width × 35% height of pad
+            float maxW = padW * 0.80f;
+            float maxH = padH * 0.35f;
+            // Each character cell: 3px glyph + 1px gap = 4px wide; 5px tall
+            float scaleW  = maxW / (len * 4.0f);
+            float scaleH  = maxH / 5.0f;
+            float scale   = std::floor(std::min(scaleW, scaleH));
+            if (scale < 1.0f) scale = 1.0f;
+
+            float cellW  = 4.0f * scale;  // glyph (3) + gap (1)
+            float textW  = len  * cellW - scale; // remove trailing gap
+            float textH  = 5.0f * scale;
+
+            // Centre horizontally; bottom ~35% of pad vertically
+            float tx = px + (padW - textW) * 0.5f;
+            float ty = py + padH * 0.62f;
+            // Clamp so text doesn't spill outside pad
+            if (ty + textH > py + padH) ty = py + padH - textH - 1.0f;
+
+            // Text colour: white on dark pads, black on bright pads
+            float lr = ((padColor >> 16) & 0xFF) / 255.0f;
+            float lg = ((padColor >>  8) & 0xFF) / 255.0f;
+            float lb = ( padColor        & 0xFF) / 255.0f;
+            float lum = 0.299f*lr + 0.587f*lg + 0.114f*lb;
+            uint32_t textColor = (lum > 0.45f) ? 0xFF000000u : 0xFFFFFFFFu;
+
+            // Draw each character
+            for (int ci = 0; ci < len; ++ci) {
+                int fi = fontIdx(label[ci]);
+                float cx = tx + ci * cellW;
+                for (int r = 0; r < 5; ++r) {
+                    uint8_t bits = kFont3x5[fi][r];
+                    for (int c = 0; c < 3; ++c) {
+                        if (bits & (1u << (2 - c))) {
+                            drawRect(cx + c * scale,
+                                     ty + r * scale,
+                                     scale, scale, textColor);
+                        }
+                    }
+                }
+            }
+        }
+
         gs_technique_end_pass(tech);
     }
+
     gs_technique_end(tech);
 }
 
