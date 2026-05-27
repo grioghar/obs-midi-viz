@@ -213,8 +213,10 @@ jobs:
         id: cache-obs
         uses: actions/cache@v4
         with:
-          path: obs-install
-          key: obs-${{ env.OBS_VERSION }}-win-x64-v3
+          path: |
+            obs-install
+            obs-deps
+          key: obs-${{ env.OBS_VERSION }}-win-x64-v4
 
       - name: Clone OBS source
         if: steps.cache-obs.outputs.cache-hit != 'true'
@@ -225,9 +227,14 @@ jobs:
       - name: Build libobs from source
         if: steps.cache-obs.outputs.cache-hit != 'true'
         run: |
-          # No vcpkg — OBS's BuildSpec.cmake auto-downloads its own obs-deps
-          # bundle (same mechanism that works on macOS). Passing the toolchain
-          # file would intercept every find_package() and prevent that.
+          # OBS on Windows does NOT auto-download deps; we must supply them.
+          # Download the official pre-built obs-deps (CURL, FFmpeg, zlib, etc.)
+          # that OBS's cmake expects to find via CMAKE_PREFIX_PATH.
+          Invoke-WebRequest `
+            -Uri "https://github.com/obsproject/obs-deps/releases/download/2024-05-08/windows-deps-2024-05-08-x64.zip" `
+            -OutFile obs-deps.zip
+          Expand-Archive -Path obs-deps.zip -DestinationPath obs-deps
+
           cmake -B obs-build -S obs-source `
             -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
@@ -237,6 +244,7 @@ jobs:
             -DENABLE_BROWSER=OFF `
             -DENABLE_WEBSOCKET=OFF `
             -DENABLE_UPDATER=OFF `
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-deps" `
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/obs-install"
 
           cmake --build obs-build --config Release --target libobs --parallel
