@@ -167,7 +167,7 @@ elseif(APPLE)
   # Install the .plugin bundle to the root — user extracts tar then copies
   # obs-midi-viz.plugin/ into ~/Library/Application Support/obs-studio/plugins/
   install(TARGETS obs-midi-viz
-    BUNDLE DESTINATION "."
+    LIBRARY DESTINATION "."
     COMPONENT obs-midi-viz
   )
   # Data lives inside the bundle where OBS expects it (Contents/Resources)
