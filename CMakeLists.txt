@@ -134,9 +134,17 @@ target_compile_definitions(obs-midi-viz PRIVATE
   PLUGIN_VERSION="${PROJECT_VERSION}"
 )
 
-# Strip the default "lib" prefix so the output is obs-midi-viz.so / .dll,
-# not libobs-midi-viz.so — OBS expects the plain name.
+# Strip the "lib" prefix on all platforms (obs-midi-viz.so / .dll not libobs-midi-viz.so).
 set_target_properties(obs-midi-viz PROPERTIES PREFIX "")
+
+# On macOS, OBS loads plugins as .plugin bundles (same as its own bundled plugins).
+# cmake BUNDLE TRUE produces obs-midi-viz.plugin/Contents/MacOS/obs-midi-viz.
+if(APPLE)
+  set_target_properties(obs-midi-viz PROPERTIES
+    BUNDLE           TRUE
+    BUNDLE_EXTENSION plugin
+  )
+endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Install — layout matches OBS's plugin search paths so the zip/tar can be
@@ -163,12 +171,15 @@ if(WIN32)
     COMPONENT obs-midi-viz
   )
 elseif(APPLE)
+  # Install the .plugin bundle to the root — user extracts tar then copies
+  # obs-midi-viz.plugin/ into ~/Library/Application Support/obs-studio/plugins/
   install(TARGETS obs-midi-viz
-    LIBRARY DESTINATION "obs-midi-viz/bin"
+    BUNDLE DESTINATION "."
     COMPONENT obs-midi-viz
   )
+  # Data lives inside the bundle where OBS expects it (Contents/Resources)
   install(DIRECTORY data/
-    DESTINATION "obs-midi-viz/data"
+    DESTINATION "obs-midi-viz.plugin/Contents/Resources"
     COMPONENT obs-midi-viz
   )
 else()
