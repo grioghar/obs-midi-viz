@@ -4,6 +4,9 @@
 #include <obs-module.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstring>
+#include <cstdio>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // General MIDI percussion map (note 35–81); everything else is nullptr.
@@ -66,7 +69,7 @@ static const uint8_t kFont3x5[38][5] = {
     {5,5,6,5,5}, // K
     {4,4,4,4,7}, // L
     {5,7,5,5,5}, // M
-    {5,5,7,5,5}, // N  (differs from M: mid-row filled vs top)
+    {5,5,7,5,5}, // N
     {2,5,5,5,2}, // O
     {6,5,6,4,4}, // P
     {2,5,5,7,3}, // Q
@@ -75,7 +78,7 @@ static const uint8_t kFont3x5[38][5] = {
     {7,2,2,2,2}, // T
     {5,5,5,5,7}, // U
     {5,5,5,2,2}, // V
-    {5,5,7,5,5}, // W  (accepted visual overlap with N; context disambiguates)
+    {5,5,7,5,5}, // W
     {5,5,2,5,5}, // X
     {5,5,2,2,2}, // Y
     {7,1,2,4,7}, // Z
@@ -103,19 +106,148 @@ static uint32_t lerp_argb(uint32_t a, uint32_t b, float t)
          |  l8( a     &0xFF, b     &0xFF);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pad visual styles
+// ─────────────────────────────────────────────────────────────────────────────
+static constexpr int kPadSquare  = 0;  // fills the full cell rectangle
+static constexpr int kPadRounded = 1;  // 84 % × 84 % centred (bevelled look)
+static constexpr int kPadCircle  = 2;  // min(w,h)*0.78 centred (circular look)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Device preset descriptors
+// Each preset is a fully self-contained set of defaults that can be applied
+// in one click from the Properties panel.  Users can still override any field
+// after applying a preset.
+// ─────────────────────────────────────────────────────────────────────────────
+struct DevicePreset {
+    const char *id;
+    const char *displayName;
+    int         cols, rows, baseNote;
+    uint32_t    colorPanel;   // outer panel / canvas background
+    uint32_t    colorIdle;    // unlit pad colour
+    uint32_t    colorHit;     // active / hit pad colour
+    int         padStyle;     // kPad*
+};
+
+static const DevicePreset kPresets[] = {
+    // ── Generic ──────────────────────────────────────────────────────────────
+    {"generic_4x4",     "Generic 4×4",              4, 4,  36,
+     0xFF0D0D0D, 0xFF1A1A2E, 0xFFFF6600, kPadSquare},
+    {"generic_8x8",     "Generic 8×8",              8, 8,  36,
+     0xFF0D0D0D, 0xFF1A1A2E, 0xFFFF6600, kPadSquare},
+
+    // ── Roland ───────────────────────────────────────────────────────────────
+    // TR-808 — warm orange hits on near-black wood-panel background;
+    //          the gold standard of hip-hop and trap kick/snare/hi-hat.
+    {"tr808",           "Roland TR-808",             4, 4,  35,
+     0xFF1C1208, 0xFF2E1E08, 0xFFFF8800, kPadSquare},
+    // TR-909 — clean white hits on charcoal; the house and techno archetype.
+    {"tr909",           "Roland TR-909",             4, 4,  36,
+     0xFF141414, 0xFF282828, 0xFFE8E8E8, kPadSquare},
+    // TR-707 — bright red-orange on dark grey; pop and early electronic.
+    {"tr707",           "Roland TR-707",             4, 4,  36,
+     0xFF242424, 0xFF333333, 0xFFFF3300, kPadSquare},
+    // TR-606 — 6-instrument companion to the TB-303 (2-col × 3-row).
+    {"tr606",           "Roland TR-606",             2, 3,  36,
+     0xFF1A1208, 0xFF2A1E10, 0xFFFF6600, kPadSquare},
+    // SP-404 — portable sampler; staple of lo-fi and beat-tape production.
+    {"sp404",           "Roland SP-404",             4, 4,  36,
+     0xFF1A0A00, 0xFF2A1400, 0xFFFF5500, kPadSquare},
+
+    // ── Akai MPC ─────────────────────────────────────────────────────────────
+    // MPC 60 — Roger Linn / Akai, the first MPC; defined golden-era hip-hop.
+    {"mpc60",           "Akai MPC 60",               4, 4,  35,
+     0xFF1C1A18, 0xFF282422, 0xFFFFAA00, kPadRounded},
+    // MPC 3000 — the Dre / Premier / Dilla workhorse.
+    {"mpc3000",         "Akai MPC 3000",             4, 4,  35,
+     0xFF1A1818, 0xFF262222, 0xFFFFBB00, kPadRounded},
+    // MPC Live — modern standalone MPC with vivid RGB pads.
+    {"mpc_live",        "Akai MPC Live",             4, 4,  36,
+     0xFF101010, 0xFF1A1A1A, 0xFFFF4400, kPadRounded},
+
+    // ── Native Instruments Maschine ──────────────────────────────────────────
+    {"maschine_studio", "NI Maschine Studio",        4, 4,  36,
+     0xFF080808, 0xFF141414, 0xFFFF3300, kPadRounded},
+    {"maschine_mk3",    "NI Maschine Mk3",           4, 4,  36,
+     0xFF0A0A0A, 0xFF161616, 0xFFFF6600, kPadRounded},
+    {"maschine_mikro",  "NI Maschine Mikro",         4, 4,  36,
+     0xFF0D0D0D, 0xFF181818, 0xFFFF5500, kPadRounded},
+
+    // ── Hip-Hop Heritage ─────────────────────────────────────────────────────
+    // E-mu SP-1200 — punchy, filtered sound; golden-age NY hip-hop (4×2 bank).
+    {"sp1200",          "E-mu SP-1200",              4, 2,  35,
+     0xFF1E1610, 0xFF2A2018, 0xFFFFCC00, kPadSquare},
+    // Oberheim DMX — Run-DMC, LL Cool J; hard-clap and deep kick (4×2).
+    {"dmx",             "Oberheim DMX",              4, 2,  35,
+     0xFF1A1A22, 0xFF26263A, 0xFFFF0066, kPadSquare},
+    // LinnDrum — Prince, Human League, Hall & Oates; pop-electronic (4×2).
+    {"linndrum",        "LinnDrum",                  4, 2,  35,
+     0xFF1E1E28, 0xFF2A2A38, 0xFFFF4488, kPadSquare},
+
+    // ── Elektron ─────────────────────────────────────────────────────────────
+    // Digitakt — modern digital sampler/sequencer, amber accent, 4×4.
+    {"digitakt",        "Elektron Digitakt",         4, 4,  36,
+     0xFF111214, 0xFF1C1E22, 0xFFFFAA00, kPadSquare},
+    // Analog Rytm — analog/acoustic sample hybrid, 12 voices (4×3).
+    {"analog_rytm",     "Elektron Analog Rytm",      4, 3,  36,
+     0xFF0E1012, 0xFF181C20, 0xFFFF5500, kPadSquare},
+
+    // ── Novation Launchpad ───────────────────────────────────────────────────
+    // Original Launchpad — the live-performance clip launcher that defined
+    // festival EDM button-pushing; 8×8 green pads on near-black.
+    {"launchpad",       "Novation Launchpad",        8, 8,  36,
+     0xFF080808, 0xFF101010, 0xFF00CC44, kPadSquare},
+    {"launchpad_mini",  "Novation Launchpad Mini",   8, 8,  36,
+     0xFF0A0A0A, 0xFF141414, 0xFF00AA33, kPadSquare},
+    // Launchpad X — full RGB, velocity-sensitive; rounded pad aesthetic.
+    {"launchpad_x",     "Novation Launchpad X",      8, 8,  36,
+     0xFF060606, 0xFF0E0E0E, 0xFF6633FF, kPadRounded},
+    // Launchpad Pro — flagship; aftertouch, extra top/side rows (8×8 main grid).
+    {"launchpad_pro",   "Novation Launchpad Pro",    8, 8,  36,
+     0xFF060606, 0xFF0E0E0E, 0xFF00FFCC, kPadRounded},
+
+    // ── Arturia ──────────────────────────────────────────────────────────────
+    // BeatStep Pro — 16-step sequencer rows, circular pads (8×2 display).
+    {"beatstep_pro",    "Arturia BeatStep Pro",      8, 2,  36,
+     0xFF1A1214, 0xFF2A2030, 0xFFFF2255, kPadCircle},
+    // DrumBrute — analog drum synthesizer, circular pads, warm-red flash.
+    {"drumbrute",       "Arturia DrumBrute",         4, 4,  36,
+     0xFF181C20, 0xFF242830, 0xFFFF6622, kPadCircle},
+
+    // ── Korg ─────────────────────────────────────────────────────────────────
+    // Volca Beats — lo-fi analog; yellow accent on dark olive.
+    {"volca_beats",     "Korg Volca Beats",          4, 4,  36,
+     0xFF1A1A10, 0xFF282814, 0xFFFFCC00, kPadCircle},
+};
+
+static constexpr int kNumPresets = (int)(sizeof(kPresets) / sizeof(kPresets[0]));
+
+// Finds a preset by id; returns nullptr if not found.
+static const DevicePreset *findPreset(const char *id)
+{
+    for (int i = 0; i < kNumPresets; ++i)
+        if (strcmp(kPresets[i].id, id) == 0)
+            return &kPresets[i];
+    return nullptr;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 struct DrumSource {
     static constexpr int MAX_PADS = 64;
 
     int     padNote[MAX_PADS];   // MIDI note number; -1 = unused
     float   padFlash[MAX_PADS];  // 0.0–1.0 brightness (decays each tick)
 
-    int  columns    = 4;
-    int  rows       = 4;
-    int  baseNote   = 36;   // MIDI note for the first pad (GM = 36 = Bass Drum 1)
-    bool showLabels = true;
+    char     presetId[32] = "generic_4x4";
+    int      columns      = 4;
+    int      rows         = 4;
+    int      baseNote     = 36;
+    bool     showLabels   = true;
+    int      padStyleInt  = kPadSquare;
 
-    uint32_t colorHit  = 0xFFFF6600;
-    uint32_t colorIdle = 0xFF1A1A2E;
+    uint32_t colorPanel = 0xFF0D0D0D;   // canvas / panel background
+    uint32_t colorHit   = 0xFFFF6600;   // active pad
+    uint32_t colorIdle  = 0xFF1A1A2E;   // unlit pad
 
     uint32_t midiHandle = 0;
     int      midiPort   = -1;
@@ -145,20 +277,31 @@ static void rebuild_pad_notes(DrumSource *s)
         s->padNote[i] = (i < totalPads) ? (s->baseNote + i) : -1;
 }
 
+// Reads all settings into an existing DrumSource (used by create + update).
+static void load_settings(DrumSource *s, obs_data_t *settings)
+{
+    strncpy(s->presetId, obs_data_get_string(settings, "preset_id"),
+            sizeof(s->presetId) - 1);
+    s->presetId[sizeof(s->presetId) - 1] = '\0';
+
+    s->columns     = (int)obs_data_get_int(settings,    "columns");
+    s->rows        = (int)obs_data_get_int(settings,    "rows");
+    s->baseNote    = (int)obs_data_get_int(settings,    "base_note");
+    s->showLabels  = obs_data_get_bool(settings,        "show_labels");
+    s->padStyleInt = (int)obs_data_get_int(settings,    "pad_style");
+    s->colorPanel  = (uint32_t)obs_data_get_int(settings, "color_panel");
+    s->colorHit    = (uint32_t)obs_data_get_int(settings, "color_hit");
+    s->colorIdle   = (uint32_t)obs_data_get_int(settings, "color_idle");
+    s->midiPort    = (int)obs_data_get_int(settings,    "midi_port");
+}
+
 static const char *drum_get_name(void *) { return obs_module_text("DrumSource.Name"); }
 
 static void *drum_create(obs_data_t *settings, obs_source_t *source)
 {
     (void)source;
     auto *s = new DrumSource{};
-    s->columns    = (int)obs_data_get_int(settings, "columns");
-    s->rows       = (int)obs_data_get_int(settings, "rows");
-    s->baseNote   = (int)obs_data_get_int(settings, "base_note");
-    s->showLabels = obs_data_get_bool(settings, "show_labels");
-    s->colorHit   = (uint32_t)obs_data_get_int(settings, "color_hit");
-    s->colorIdle  = (uint32_t)obs_data_get_int(settings, "color_idle");
-    s->midiPort   = (int)obs_data_get_int(settings, "midi_port");
-
+    load_settings(s, settings);
     rebuild_pad_notes(s);
     apply_midi_port(s->midiPort);
 
@@ -175,8 +318,6 @@ static void *drum_create(obs_data_t *settings, obs_source_t *source)
             }
         }
         if (!matched) {
-            // Help the user diagnose controller mappings.
-            // OBS log: Tools → Log Files → View Current Log File
             MIDI_LOG_INFO(
                 "Drum: received unmapped NoteOn %d (vel=%d ch=%d port=%d). "
                 "Adjust 'Base Note' in source properties if this is your pad controller.",
@@ -184,7 +325,8 @@ static void *drum_create(obs_data_t *settings, obs_source_t *source)
         }
     });
 
-    MIDI_LOG_INFO("Drum source created (%dx%d, baseNote=%d)", s->columns, s->rows, s->baseNote);
+    MIDI_LOG_INFO("Drum source created (%dx%d, baseNote=%d, preset=%s)",
+                  s->columns, s->rows, s->baseNote, s->presetId);
     return s;
 }
 
@@ -197,19 +339,51 @@ static void drum_destroy(void *data)
 
 static void drum_defaults(obs_data_t *settings)
 {
-    obs_data_set_default_int( settings, "midi_port",    -1);
-    obs_data_set_default_int( settings, "columns",       4);
-    obs_data_set_default_int( settings, "rows",          4);
-    obs_data_set_default_int( settings, "base_note",    36);
-    obs_data_set_default_bool(settings, "show_labels",  true);
-    obs_data_set_default_int( settings, "color_hit",    (int64_t)0xFFFF6600u);
-    obs_data_set_default_int( settings, "color_idle",   (int64_t)0xFF1A1A2Eu);
+    obs_data_set_default_string(settings, "preset_id",    "generic_4x4");
+    obs_data_set_default_int(   settings, "midi_port",    -1);
+    obs_data_set_default_int(   settings, "columns",       4);
+    obs_data_set_default_int(   settings, "rows",          4);
+    obs_data_set_default_int(   settings, "base_note",    36);
+    obs_data_set_default_bool(  settings, "show_labels",  true);
+    obs_data_set_default_int(   settings, "pad_style",    kPadSquare);
+    obs_data_set_default_int(   settings, "color_panel",  (int64_t)0xFF0D0D0Du);
+    obs_data_set_default_int(   settings, "color_hit",    (int64_t)0xFFFF6600u);
+    obs_data_set_default_int(   settings, "color_idle",   (int64_t)0xFF1A1A2Eu);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modified callback: when the preset dropdown changes, push all preset values
+// into settings so the other property widgets reflect the new preset.
+// ─────────────────────────────────────────────────────────────────────────────
+static bool preset_changed(obs_properties_t *props, obs_property_t *, obs_data_t *settings)
+{
+    (void)props;
+    const char *id = obs_data_get_string(settings, "preset_id");
+    const DevicePreset *p = findPreset(id);
+    if (!p) return false;
+
+    obs_data_set_int(settings,  "columns",     p->cols);
+    obs_data_set_int(settings,  "rows",        p->rows);
+    obs_data_set_int(settings,  "base_note",   p->baseNote);
+    obs_data_set_int(settings,  "pad_style",   p->padStyle);
+    obs_data_set_int(settings,  "color_panel", (int64_t)p->colorPanel);
+    obs_data_set_int(settings,  "color_idle",  (int64_t)p->colorIdle);
+    obs_data_set_int(settings,  "color_hit",   (int64_t)p->colorHit);
+    return true;  // signal OBS to refresh the properties panel
 }
 
 static obs_properties_t *drum_properties(void *)
 {
     obs_properties_t *props = obs_properties_create();
 
+    // ── Device preset ────────────────────────────────────────────────────────
+    obs_property_t *preset_list = obs_properties_add_list(props, "preset_id",
+        "Device Preset", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+    for (int i = 0; i < kNumPresets; ++i)
+        obs_property_list_add_string(preset_list, kPresets[i].displayName, kPresets[i].id);
+    obs_property_set_modified_callback(preset_list, preset_changed);
+
+    // ── MIDI port ────────────────────────────────────────────────────────────
     obs_property_t *port_list = obs_properties_add_list(props, "midi_port",
         "MIDI Input Device", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
     obs_property_list_add_int(port_list, "Disabled", -1);
@@ -228,25 +402,29 @@ static obs_properties_t *drum_properties(void *)
             return true;
         });
 
+    // ── Grid ─────────────────────────────────────────────────────────────────
     obs_properties_add_int( props, "columns",    "Grid columns",          1, 8, 1);
     obs_properties_add_int( props, "rows",       "Grid rows",             1, 8, 1);
     obs_properties_add_int( props, "base_note",  "Base Note (first pad)", 0, 120, 1);
-    obs_properties_add_bool(props, "show_labels","Show pad labels");
-    obs_properties_add_color(props, "color_hit",  "Hit colour");
-    obs_properties_add_color(props, "color_idle", "Idle colour");
+
+    // ── Visuals ──────────────────────────────────────────────────────────────
+    obs_property_t *style_list = obs_properties_add_list(props, "pad_style",
+        "Pad Style", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+    obs_property_list_add_int(style_list, "Square",  kPadSquare);
+    obs_property_list_add_int(style_list, "Rounded", kPadRounded);
+    obs_property_list_add_int(style_list, "Circle",  kPadCircle);
+
+    obs_properties_add_bool( props, "show_labels",  "Show pad labels");
+    obs_properties_add_color(props, "color_panel",  "Panel background");
+    obs_properties_add_color(props, "color_idle",   "Pad colour (idle)");
+    obs_properties_add_color(props, "color_hit",    "Pad colour (hit)");
     return props;
 }
 
 static void drum_update(void *data, obs_data_t *settings)
 {
     auto *s = static_cast<DrumSource *>(data);
-    s->columns    = (int)obs_data_get_int(settings, "columns");
-    s->rows       = (int)obs_data_get_int(settings, "rows");
-    s->baseNote   = (int)obs_data_get_int(settings, "base_note");
-    s->showLabels = obs_data_get_bool(settings, "show_labels");
-    s->colorHit   = (uint32_t)obs_data_get_int(settings, "color_hit");
-    s->colorIdle  = (uint32_t)obs_data_get_int(settings, "color_idle");
-    s->midiPort   = (int)obs_data_get_int(settings, "midi_port");
+    load_settings(s, settings);
     rebuild_pad_notes(s);
     apply_midi_port(s->midiPort);
 }
@@ -265,18 +443,20 @@ static uint32_t drum_get_width (void *data) { return static_cast<DrumSource*>(da
 static uint32_t drum_get_height(void *data) { return static_cast<DrumSource*>(data)->cy; }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 4 render — actual pad grid with per-pad colour and bitmap labels.
+// Render — pad grid with per-pad colour, pad-style shaping, and bitmap labels.
 //
 // Layout:
 //   gap  = 5% of the smaller pad dimension (min 2 px)
-//   padW = (cx - gap*(cols+1)) / cols
+//   padW = (cx - gap*(cols+1)) / cols        ← grid cell size
 //   padH = (cy - gap*(rows+1)) / rows
 //
-// Each pad is lerped from colorIdle → colorHit by padFlash[i].
-// When showLabels is true, a GM drum name (or MIDI note number for
-// unmapped notes) is drawn in the bottom ~35% of each pad using the
-// 3×5 bitmap font, auto-scaled to fit.
-// Text colour is chosen by background luminance (white on dark, black on light).
+// Pad shape (inside the grid cell) is governed by padStyle:
+//   Square  : full padW × padH
+//   Rounded : 84 % × 84 %, centred in the cell
+//   Circle  : min(padW,padH)*0.78 centred (looks round when cells are square)
+//
+// Label text (when showLabels) occupies the bottom 35 % of the drawn pad,
+// auto-scaled to 80 % width using the 3×5 bitmap font.
 //
 // Uses gs_technique_begin/end directly — gs_effect_loop cannot be nested
 // inside OBS's compositing pass.
@@ -291,7 +471,6 @@ static void drum_render(void *data, gs_effect_t *effect)
     const int   cols = std::max(1, s->columns);
     const int   rows = std::max(1, s->rows);
 
-    // Gap between pads (proportional; at least 2 px)
     const float minDim = std::min(W / cols, H / rows);
     const float gap    = std::max(2.0f, minDim * 0.05f);
     const float padW   = (W - gap * (cols + 1)) / cols;
@@ -303,15 +482,16 @@ static void drum_render(void *data, gs_effect_t *effect)
     gs_technique_t *tech       = gs_effect_get_technique(solid, "Solid");
     size_t          passes     = gs_technique_begin(tech);
 
+    // ── drawRect helper ──────────────────────────────────────────────────────
     auto drawRect = [&](float x, float y, float w, float h, uint32_t argb) {
         if (w < 1.0f || h < 1.0f) return;
-        struct vec4 col;
-        vec4_set(&col,
+        struct vec4 color;
+        vec4_set(&color,
             ((argb >> 16) & 0xFF) / 255.0f,
             ((argb >>  8) & 0xFF) / 255.0f,
             ( argb        & 0xFF) / 255.0f,
             ((argb >> 24) & 0xFF) / 255.0f);
-        gs_effect_set_vec4(colorParam, &col);
+        gs_effect_set_vec4(colorParam, &color);
         gs_matrix_push();
         gs_matrix_translate3f(x, y, 0.0f);
         gs_draw_sprite(nullptr, 0, (uint32_t)w, (uint32_t)h);
@@ -321,19 +501,41 @@ static void drum_render(void *data, gs_effect_t *effect)
     for (size_t p = 0; p < passes; ++p) {
         gs_technique_begin_pass(tech, p);
 
+        // ── Panel background (full canvas) ───────────────────────────────────
+        drawRect(0.0f, 0.0f, W, H, s->colorPanel);
+
         const int total = cols * rows;
         for (int i = 0; i < total && i < DrumSource::MAX_PADS; ++i) {
             const int   col = i % cols;
             const int   row = i / cols;
-            const float px  = gap + col * (padW + gap);
-            const float py  = gap + row * (padH + gap);
+            const float cellX = gap + col * (padW + gap);
+            const float cellY = gap + row * (padH + gap);
 
-            // ── Pad background ────────────────────────────────────────────
-            const float t = s->padFlash[i];
-            const uint32_t padColor = lerp_argb(s->colorIdle, s->colorHit, t);
-            drawRect(px, py, padW, padH, padColor);
+            // ── Pad shape ────────────────────────────────────────────────────
+            float drawW, drawH, offX, offY;
+            if (s->padStyleInt == kPadRounded) {
+                drawW = padW * 0.84f;
+                drawH = padH * 0.84f;
+                offX  = (padW - drawW) * 0.5f;
+                offY  = (padH - drawH) * 0.5f;
+            } else if (s->padStyleInt == kPadCircle) {
+                float d = std::min(padW, padH) * 0.78f;
+                drawW = drawH = d;
+                offX  = (padW - drawW) * 0.5f;
+                offY  = (padH - drawH) * 0.5f;
+            } else { // kPadSquare
+                drawW = padW; drawH = padH;
+                offX  = offY = 0.0f;
+            }
 
-            // ── Label ─────────────────────────────────────────────────────
+            const float padX = cellX + offX;
+            const float padY = cellY + offY;
+
+            // ── Pad background ───────────────────────────────────────────────
+            const uint32_t padColor = lerp_argb(s->colorIdle, s->colorHit, s->padFlash[i]);
+            drawRect(padX, padY, drawW, drawH, padColor);
+
+            // ── Label ────────────────────────────────────────────────────────
             if (!s->showLabels || s->padNote[i] < 0) continue;
 
             char label[16] = {};
@@ -345,42 +547,38 @@ static void drum_render(void *data, gs_effect_t *effect)
             int len = (int)strlen(label);
             if (len == 0) continue;
 
-            // Pick scale so the label fits in 80% width × 35% height of pad
-            float maxW = padW * 0.80f;
-            float maxH = padH * 0.35f;
-            // Each character cell: 3px glyph + 1px gap = 4px wide; 5px tall
-            float scaleW  = maxW / (len * 4.0f);
-            float scaleH  = maxH / 5.0f;
+            // Scale to fit in 80 % drawW × 35 % drawH
+            float maxTxtW = drawW * 0.80f;
+            float maxTxtH = drawH * 0.35f;
+            float scaleW  = maxTxtW / (len * 4.0f);
+            float scaleH  = maxTxtH / 5.0f;
             float scale   = std::floor(std::min(scaleW, scaleH));
             if (scale < 1.0f) scale = 1.0f;
 
-            float cellW  = 4.0f * scale;  // glyph (3) + gap (1)
-            float textW  = len  * cellW - scale; // remove trailing gap
-            float textH  = 5.0f * scale;
+            float textW = (float)len * 4.0f * scale - scale; // remove trailing gap
+            float textH = 5.0f * scale;
 
-            // Centre horizontally; bottom ~35% of pad vertically
-            float tx = px + (padW - textW) * 0.5f;
-            float ty = py + padH * 0.62f;
-            // Clamp so text doesn't spill outside pad
-            if (ty + textH > py + padH) ty = py + padH - textH - 1.0f;
+            // Centre horizontally; place in bottom 35 % of pad
+            float tx = padX + (drawW - textW) * 0.5f;
+            float ty = padY + drawH * 0.62f;
+            if (ty + textH > padY + drawH) ty = padY + drawH - textH - 1.0f;
 
-            // Text colour: white on dark pads, black on bright pads
-            float lr = ((padColor >> 16) & 0xFF) / 255.0f;
-            float lg = ((padColor >>  8) & 0xFF) / 255.0f;
-            float lb = ( padColor        & 0xFF) / 255.0f;
-            float lum = 0.299f*lr + 0.587f*lg + 0.114f*lb;
+            // Text colour by background luminance
+            float lr  = ((padColor >> 16) & 0xFF) / 255.0f;
+            float lg  = ((padColor >>  8) & 0xFF) / 255.0f;
+            float lb  = ( padColor        & 0xFF) / 255.0f;
+            float lum = 0.299f * lr + 0.587f * lg + 0.114f * lb;
             uint32_t textColor = (lum > 0.45f) ? 0xFF000000u : 0xFFFFFFFFu;
 
-            // Draw each character
             for (int ci = 0; ci < len; ++ci) {
-                int fi = fontIdx(label[ci]);
-                float cx = tx + ci * cellW;
-                for (int r = 0; r < 5; ++r) {
-                    uint8_t bits = kFont3x5[fi][r];
-                    for (int c = 0; c < 3; ++c) {
-                        if (bits & (1u << (2 - c))) {
-                            drawRect(cx + c * scale,
-                                     ty + r * scale,
+                int   fi    = fontIdx(label[ci]);
+                float charX = tx + ci * 4.0f * scale;
+                for (int row5 = 0; row5 < 5; ++row5) {
+                    uint8_t bits = kFont3x5[fi][row5];
+                    for (int bit = 0; bit < 3; ++bit) {
+                        if (bits & (1u << (2 - bit))) {
+                            drawRect(charX + bit * scale,
+                                     ty    + row5 * scale,
                                      scale, scale, textColor);
                         }
                     }
