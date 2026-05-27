@@ -64,11 +64,6 @@ if(NOT libobs_FOUND)
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Qt6
-# ─────────────────────────────────────────────────────────────────────────────
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
-
-# ─────────────────────────────────────────────────────────────────────────────
 # RtMidi via FetchContent
 # ─────────────────────────────────────────────────────────────────────────────
 include(FetchContent)
@@ -112,8 +107,6 @@ target_include_directories(obs-midi-viz PRIVATE
 
 target_link_libraries(obs-midi-viz PRIVATE
   OBS::libobs
-  Qt6::Core
-  Qt6::Widgets
   rtmidi
 )
 

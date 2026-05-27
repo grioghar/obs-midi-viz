@@ -80,11 +80,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install build tools and Qt6
+      - name: Install build tools
         run: |
-          brew install cmake ninja ffmpeg qt@6
-          echo "Qt6_DIR=$(brew --prefix qt@6)/lib/cmake/Qt6" >> $GITHUB_ENV
-          echo "FFMPEG_PREFIX=$(brew --prefix ffmpeg)"       >> $GITHUB_ENV
+          brew install cmake ninja ffmpeg
+          echo "FFMPEG_PREFIX=$(brew --prefix ffmpeg)" >> $GITHUB_ENV
 
       # ── OBS libobs (cached) ─────────────────────────────────────────────
       - name: Cache OBS build
@@ -160,7 +159,6 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
             -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path) \
-            -DQt6_DIR="${{ env.Qt6_DIR }}" \
             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install"
 
       - name: Build plugin
@@ -200,13 +198,6 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-
-      - name: Install Qt6
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.6.*"
-          arch: win64_msvc2019_64
-          cache: true
 
       # ── OBS source (headers + cmake config) ──────────────────────────────
       - name: Cache OBS build
@@ -287,7 +278,6 @@ jobs:
           cmake -B build -S . `
             -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-            -DQt6_DIR="$env:Qt6_DIR/lib/cmake/Qt6" `
             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/obs-install"
 
       - name: Build plugin
