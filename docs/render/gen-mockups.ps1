@@ -525,130 +525,177 @@ function djButton($x,$y,$w,$h,$active,$colorAct,$label) {
 function djAdd($sb, $lines) { foreach ($l in $lines) { $null = $sb.AppendLine($l) } }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 11. Write DJ controller mockup SVG
-#     Deck 0 (left, x=0-559)  : PLAYING — PLAY+SYNC active, EQ Hi boosted,
-#                                Low cut, Hot Cue 1 flashing red
-#     Deck 1 (right, x=720-1279): cued, all EQ neutral, not playing
-#     Mixer  (centre, x=560-719) : crossfader 35% toward Deck 0
+# 11. Write DJ controller mockup SVG — Pioneer DDJ-FLX4 (corrected layout)
+#
+# MIDI-accurate layout verified against DDJ-FLX4_MIDI_message_List_E1.pdf:
+#   Deck 1 transport/EQ: MIDI ch 1 (0x90/0xB0)
+#   Deck 2 transport/EQ: MIDI ch 2 (0x91/0xB1)
+#   Crossfader/Filter:   MIDI ch 7 (0xB6)
+#   Pads Deck 1 press:   MIDI ch 8 (0x97) — notes 0x00-0x07 per pad
+#   Pads Deck 2 press:   MIDI ch 10 (0x99)
+#
+#  Layout changes from previous version:
+#   • Jog r=110 (was 130) to fit 8-pad grid + loop/mode buttons below
+#   • 3 transport buttons (PLAY/CUE/SYNC) instead of 4
+#   • NEW: LOOP-IN | RELOOP | LOOP-OUT row above transport
+#   • NEW: Pad-mode selector (HC | LOOP | JUMP | SAMP)
+#   • 8 performance pads in 2×4 grid (was 4 pads)
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Helper: draw 8 pads (2 rows × 4) centred at jogCx, starting at padY1
+function djPads8($sb, $jogCx, $padY1, $hcColors8, $hcFlash8) {
+    $pW=46; $pH=26; $pSp=3
+    $pRW=4*$pW+3*$pSp
+    $px0=[double]$jogCx - $pRW/2.0
+    for ($p=0;$p-lt 8;$p++) {
+        $row=$p/4; $col=$p%4
+        $hc=$hcColors8[$p%4]; $fl=$hcFlash8[$p]; $bright=0.22+$fl*0.78
+        $hr=[Convert]::ToInt32($hc.Substring(1,2),16)
+        $hg=[Convert]::ToInt32($hc.Substring(3,2),16)
+        $hb=[Convert]::ToInt32($hc.Substring(5,2),16)
+        $pc='#{0:X2}{1:X2}{2:X2}' -f ([int]($hr*$bright)),([int]($hg*$bright)),([int]($hb*$bright))
+        $px=[double]$px0+[double]$col*($pW+$pSp)
+        $py=if ($row -eq 0) { $padY1 } else { $padY1+$pH+3 }
+        $null = $sb.AppendLine((svgR $px $py $pW $pH $pc 3))
+        $null = $sb.AppendLine("<rect x='$(fmt $px)' y='$(fmt $py)' width='$(fmt $pW)' height='$(fmt $pH)' fill='none' stroke='#555555' stroke-width='1' rx='3'/>")
+        $null = $sb.AppendLine((svgT ([double]$px+$pW*0.5) ([double]$py+$pH*0.5+4) ($p+1) '#FFFFFF' 8))
+    }
+}
+
 function Write-DjSvg($file) {
     $W = 1280; $H = 480
     $sb = [System.Text.StringBuilder]::new()
     $null = $sb.AppendLine("<?xml version='1.0' encoding='UTF-8'?>")
     $null = $sb.AppendLine("<svg width='$W' height='$H' viewBox='0 0 $W $H' xmlns='http://www.w3.org/2000/svg'>")
-
-    # Canvas background
     $null = $sb.AppendLine((svgR 0 0 $W $H '#111111'))
+
+    # Shared pad data
+    $hcColors=@('#FF2244','#2266FF','#22AA22','#FF8800')
 
     # ── DECK 0 ───────────────────────────────────────────────────────────────
     $null = $sb.AppendLine((svgR 0 0 558 $H '#1E1E1E'))
     $null = $sb.AppendLine((svgR 556 0 2 $H '#3A3A3A'))
 
-    # Jog wheel — cx=230, cy=220, r=130, platter dot at 20°, PLAYING
-    djAdd $sb (djJog 230 220 130 20 $true)
+    # Jog wheel — cx=230, cy=190, r=110, platter dot at 20°, PLAYING
+    $jog0cx=230; $jog0cy=190; $jog0r=110
+    djAdd $sb (djJog $jog0cx $jog0cy $jog0r 20 $true)
 
-    # Knob column labels (deck 0: right side, x=425)
-    $null = $sb.AppendLine((svgT 425  56 'HI'   '#AAAAAA' 9))
-    $null = $sb.AppendLine((svgT 425 131 'MID'  '#AAAAAA' 9))
-    $null = $sb.AppendLine((svgT 425 206 'LO'   '#AAAAAA' 9))
-    $null = $sb.AppendLine((svgT 425 278 'TRIM' '#AAAAAA' 9))
-    $null = $sb.AppendLine((svgT 425 343 'FILT' '#AAAAAA' 9))
+    # Knob column (deck 0: right side, x=425)
+    # CC: EQ HI=0x07, MID=0x0B, LOW=0x0F, TRIM=0x04, FILTER=0x17 (ch7)
+    $null = $sb.AppendLine((svgT 425  50 'HI'   '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 425 124 'MID'  '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 425 198 'LO'   '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 425 264 'TRIM' '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 425 318 'FILT' '#AAAAAA' 8))
+    djAdd $sb (djKnob 425  76 22 0.72 '#FF8800' $true)    # EQ Hi boosted (CC 0x07)
+    djAdd $sb (djKnob 425 150 22 0.50 '#FF8800' $true)    # EQ Mid flat   (CC 0x0B)
+    djAdd $sb (djKnob 425 224 22 0.30 '#FF8800' $true)    # EQ Low cut    (CC 0x0F)
+    djAdd $sb (djKnob 425 288 18 0.68 '#FFDD00' $false)   # Trim          (CC 0x04)
+    djAdd $sb (djKnob 425 342 18 0.55 '#00AAFF' $false)   # Filter        (CC 0x17 ch7)
 
-    # Knobs: EQ Hi boosted (0.72), Mid flat (0.50), Low cut (0.30), Trim up (0.68), Filter open (0.55)
-    djAdd $sb (djKnob 425  82 22 0.72 '#FF8800' $true)   # EQ Hi  — boosted
-    djAdd $sb (djKnob 425 157 22 0.50 '#FF8800' $true)   # EQ Mid — flat
-    djAdd $sb (djKnob 425 232 22 0.30 '#FF8800' $true)   # EQ Low — cut
-    djAdd $sb (djKnob 425 302 18 0.68 '#FFDD00' $false)  # Trim
-    djAdd $sb (djKnob 425 367 18 0.55 '#00AAFF' $false)  # Filter
+    # Volume fader (right of knob column, x=510, CC 0x13)
+    djAdd $sb (djVFader 510 48 368 0.78 '#FF8800')
+    $null = $sb.AppendLine((svgT 510 376 'VOL' '#AAAAAA' 8))
 
-    # Volume fader (far right of deck 0, x=510, value=0.78)
-    djAdd $sb (djVFader 510 48 360 0.78 '#FF8800')
-    $null = $sb.AppendLine((svgT 510 378 'VOL' '#AAAAAA' 8))
+    # Tempo fader (far left, x=50, CC 0x00)
+    djAdd $sb (djVFader 50 48 368 0.52 '#888888')
+    $null = $sb.AppendLine((svgT 50 376 'TEMPO' '#AAAAAA' 8))
 
-    # Tempo fader (far left, x=50, value=0.52 — just above centre)
-    djAdd $sb (djVFader 50 48 360 0.52 '#888888')
-    $null = $sb.AppendLine((svgT 50 378 'TEMPO' '#AAAAAA' 8))
+    # Loop controls row: IN | RELOOP | OUT  (notes 0x10, 0x4D, 0x11 on ch1)
+    $lbRW=3*58+2*4; $lbx0=[double]$jog0cx-$lbRW/2.0; $lbY=[double]$jog0cy+$jog0r+8; $lbH=20
+    djAdd $sb (djButton $lbx0           $lbY 58 $lbH $false '#00CCFF' 'LOOP-IN')
+    djAdd $sb (djButton ($lbx0+62)      $lbY 58 $lbH $false '#00CC44' 'RELOOP')
+    djAdd $sb (djButton ($lbx0+124)     $lbY 58 $lbH $false '#00CCFF' 'LOOP-OUT')
 
-    # Transport buttons — centred under jog (jogCx=230, rowW=215 → bx0=122.5)
-    $bx0=122.5; $bY=388; $bW=50; $bH=27; $bSp=5
-    djAdd $sb (djButton $bx0                     $bY $bW $bH $true  '#00CC44' 'PLAY')
-    djAdd $sb (djButton ($bx0+$bW+$bSp)          $bY $bW $bH $false '#0088FF' 'CUE')
-    djAdd $sb (djButton ($bx0+2*($bW+$bSp))      $bY $bW $bH $true  '#FF8800' 'SYNC')
-    djAdd $sb (djButton ($bx0+3*($bW+$bSp))      $bY $bW $bH $false '#00CCFF' 'LOOP')
+    # Transport row: PLAY | CUE | SYNC  (notes 0x0B, 0x0C, 0x58 on ch1)
+    $tbY=$lbY+$lbH+4; $tbH=26
+    $tbRW=70+57+57+2*4; $tbx0=[double]$jog0cx-$tbRW/2.0
+    djAdd $sb (djButton $tbx0            $tbY 70 $tbH $true  '#00CC44' 'PLAY')
+    djAdd $sb (djButton ($tbx0+74)       $tbY 57 $tbH $false '#0088FF' 'CUE')
+    djAdd $sb (djButton ($tbx0+135)      $tbY 57 $tbH $true  '#FF8800' 'SYNC')
 
-    # Hot-cue pads — centred under transport (px0=122.5, padY=432)
-    $hcColors=@('#FF2244','#2266FF','#22AA22','#FF8800')
-    $hcFlash =@(0.70, 0.22, 0.22, 0.22)   # HC1 just fired
-    $px0=122.5; $pY=432; $pW=50; $pH=30; $pSp=5
-    for ($p=0;$p-lt 4;$p++) {
-        $hc=$hcColors[$p]; $fl=$hcFlash[$p]; $bright=0.25+$fl*0.75
-        $hr=[Convert]::ToInt32($hc.Substring(1,2),16)
-        $hg=[Convert]::ToInt32($hc.Substring(3,2),16)
-        $hb=[Convert]::ToInt32($hc.Substring(5,2),16)
-        $pc='#{0:X2}{1:X2}{2:X2}' -f ([int]($hr*$bright)),([int]($hg*$bright)),([int]($hb*$bright))
-        $px=$px0+[double]$p*($pW+$pSp)
-        $null = $sb.AppendLine((svgR $px $pY $pW $pH $pc 3))
-        $null = $sb.AppendLine("<rect x='$(fmt $px)' y='$(fmt $pY)' width='$(fmt $pW)' height='$(fmt $pH)' fill='none' stroke='#555555' stroke-width='1' rx='3'/>")
-        $null = $sb.AppendLine((svgT ($px+$pW*0.5) ($pY+$pH*0.5+4) ($p+1) '#FFFFFF' 9))
+    # Pad mode selector: HC | LOOP | JUMP | SAMP
+    $modeColors=@('#FF4444','#00CCFF','#FFAA00','#AA44FF'); $modeLabels=@('HC','LOOP','JUMP','SAMP')
+    $mbY=$tbY+$tbH+4; $mbH=14; $mbW=46; $mbSp=3
+    $mbRW=4*$mbW+3*$mbSp; $mbx0=[double]$jog0cx-$mbRW/2.0
+    for ($m=0;$m-lt 4;$m++) {
+        $mx=[double]$mbx0+[double]$m*($mbW+$mbSp)
+        $mc=$modeColors[$m]; $active=($m -eq 0)  # HC active
+        $bg=if ($active) { $mc } else { '#222222' }
+        $tc=if ($active) { '#FFFFFF' } else { '#666666' }
+        $null = $sb.AppendLine((svgR $mx $mbY $mbW $mbH $bg 2))
+        $null = $sb.AppendLine("<rect x='$(fmt $mx)' y='$(fmt $mbY)' width='$(fmt $mbW)' height='$(fmt $mbH)' fill='none' stroke='$mc' stroke-width='1' rx='2'/>")
+        $null = $sb.AppendLine((svgT ([double]$mx+$mbW*0.5) ([double]$mbY+$mbH*0.5+3.5) $modeLabels[$m] $tc 8))
     }
+
+    # 8 performance pads (2×4) — HC1 flashing, rest dim (ch8, notes 0x00-0x07)
+    $padY=[double]$mbY+$mbH+3
+    $hcFlash0=@(0.85, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22)
+    djPads8 $sb $jog0cx $padY $hcColors $hcFlash0
 
     # ── MIXER ────────────────────────────────────────────────────────────────
     $null = $sb.AppendLine((svgR 560 0 160 $H '#191919'))
     $null = $sb.AppendLine((svgR 560 0   1 $H '#3A3A3A'))
     $null = $sb.AppendLine((svgR 719 0   1 $H '#3A3A3A'))
-    $null = $sb.AppendLine((svgT 640 30 'MIX' '#FF8800' 14))
-    djAdd $sb (djHFader 578 702 430 0.38)     # crossfader: 38% toward Deck 0
-    $null = $sb.AppendLine((svgT 640 452 'XFADER' '#AAAAAA' 9))
+    $null = $sb.AppendLine((svgT 640 22 'DDJ-FLX4' '#FF8800' 11))
+    # Crossfader: CC 0x1F on MIDI ch7 (status 0xB6)
+    djAdd $sb (djHFader 578 702 420 0.38)
+    $null = $sb.AppendLine((svgT 640 440 'XFADER' '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 640 453 'CC 0x1F  ch7' '#444444' 7))
 
     # ── DECK 1 ───────────────────────────────────────────────────────────────
     $null = $sb.AppendLine((svgR 720 0 560 $H '#1E1E1E'))
     $null = $sb.AppendLine((svgR 720 0   2 $H '#3A3A3A'))
 
-    # Jog wheel — cx=1050, cy=220, r=130, platter dot at 240°, NOT playing
-    djAdd $sb (djJog 1050 220 130 240 $false)
+    # Jog wheel — cx=1050, cy=190, r=110, platter dot at 240°, NOT playing
+    $jog1cx=1050; $jog1cy=190; $jog1r=110
+    djAdd $sb (djJog $jog1cx $jog1cy $jog1r 240 $false)
 
-    # Knob column labels (deck 1 mirrored: knobX=856)
-    $null = $sb.AppendLine((svgT 856  56 'HI'   '#AAAAAA' 9))
-    $null = $sb.AppendLine((svgT 856 131 'MID'  '#AAAAAA' 9))
-    $null = $sb.AppendLine((svgT 856 206 'LO'   '#AAAAAA' 9))
-    $null = $sb.AppendLine((svgT 856 278 'TRIM' '#AAAAAA' 9))
-    $null = $sb.AppendLine((svgT 856 343 'FILT' '#AAAAAA' 9))
+    # Knob column (deck 1 mirrored: knobX=856)
+    $null = $sb.AppendLine((svgT 856  50 'HI'   '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 856 124 'MID'  '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 856 198 'LO'   '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 856 264 'TRIM' '#AAAAAA' 8))
+    $null = $sb.AppendLine((svgT 856 318 'FILT' '#AAAAAA' 8))
+    djAdd $sb (djKnob 856  76 22 0.50 '#FF8800' $true)
+    djAdd $sb (djKnob 856 150 22 0.50 '#FF8800' $true)
+    djAdd $sb (djKnob 856 224 22 0.50 '#FF8800' $true)
+    djAdd $sb (djKnob 856 288 18 0.55 '#FFDD00' $false)
+    djAdd $sb (djKnob 856 342 18 0.44 '#00AAFF' $false)
 
-    # Knobs (EQ neutral, trim/filter slightly off centre)
-    djAdd $sb (djKnob 856  82 22 0.50 '#FF8800' $true)   # EQ Hi
-    djAdd $sb (djKnob 856 157 22 0.50 '#FF8800' $true)   # EQ Mid
-    djAdd $sb (djKnob 856 232 22 0.50 '#FF8800' $true)   # EQ Low
-    djAdd $sb (djKnob 856 302 18 0.55 '#FFDD00' $false)  # Trim
-    djAdd $sb (djKnob 856 367 18 0.44 '#00AAFF' $false)  # Filter
+    # Volume fader (mirrored: left of knob column, x=772)
+    djAdd $sb (djVFader 772 48 368 0.62 '#FF8800')
+    $null = $sb.AppendLine((svgT 772 376 'VOL' '#AAAAAA' 8))
 
-    # Volume fader (mirrored: far left of deck 1 zone = x=772)
-    djAdd $sb (djVFader 772 48 360 0.62 '#FF8800')
-    $null = $sb.AppendLine((svgT 772 378 'VOL' '#AAAAAA' 8))
+    # Tempo fader (mirrored: far right, x=1230)
+    djAdd $sb (djVFader 1230 48 368 0.50 '#888888')
+    $null = $sb.AppendLine((svgT 1230 376 'TEMPO' '#AAAAAA' 8))
 
-    # Tempo fader (mirrored: far right = x=1230)
-    djAdd $sb (djVFader 1230 48 360 0.50 '#888888')
-    $null = $sb.AppendLine((svgT 1230 378 'TEMPO' '#AAAAAA' 8))
+    # Loop controls row (deck 1, mirrored — notes on ch2)
+    $lb1RW=3*58+2*4; $lb1x0=[double]$jog1cx-$lb1RW/2.0; $lb1Y=[double]$jog1cy+$jog1r+8
+    djAdd $sb (djButton $lb1x0           $lb1Y 58 $lbH $false '#00CCFF' 'LOOP-IN')
+    djAdd $sb (djButton ($lb1x0+62)      $lb1Y 58 $lbH $false '#00CC44' 'RELOOP')
+    djAdd $sb (djButton ($lb1x0+124)     $lb1Y 58 $lbH $false '#00CCFF' 'LOOP-OUT')
 
-    # Transport buttons — centred under jog (jogCx=1050 → bx1=942.5)
-    $bx1=942.5
-    djAdd $sb (djButton $bx1                      $bY $bW $bH $false '#00CC44' 'PLAY')
-    djAdd $sb (djButton ($bx1+$bW+$bSp)           $bY $bW $bH $false '#0088FF' 'CUE')
-    djAdd $sb (djButton ($bx1+2*($bW+$bSp))       $bY $bW $bH $false '#FF8800' 'SYNC')
-    djAdd $sb (djButton ($bx1+3*($bW+$bSp))       $bY $bW $bH $false '#00CCFF' 'LOOP')
+    # Transport row (deck 1)
+    $tb1Y=$lb1Y+$lbH+4; $tb1RW=$tbRW; $tb1x0=[double]$jog1cx-$tb1RW/2.0
+    djAdd $sb (djButton $tb1x0           $tb1Y 70 $tbH $false '#00CC44' 'PLAY')
+    djAdd $sb (djButton ($tb1x0+74)      $tb1Y 57 $tbH $false '#0088FF' 'CUE')
+    djAdd $sb (djButton ($tb1x0+135)     $tb1Y 57 $tbH $false '#FF8800' 'SYNC')
 
-    # Hot-cue pads (all dim, deck 1)
-    $px1=942.5
-    for ($p=0;$p-lt 4;$p++) {
-        $hc=$hcColors[$p]; $fl=0.22; $bright=0.25+$fl*0.75
-        $hr=[Convert]::ToInt32($hc.Substring(1,2),16)
-        $hg=[Convert]::ToInt32($hc.Substring(3,2),16)
-        $hb=[Convert]::ToInt32($hc.Substring(5,2),16)
-        $pc='#{0:X2}{1:X2}{2:X2}' -f ([int]($hr*$bright)),([int]($hg*$bright)),([int]($hb*$bright))
-        $px=$px1+[double]$p*($pW+$pSp)
-        $null = $sb.AppendLine((svgR $px $pY $pW $pH $pc 3))
-        $null = $sb.AppendLine("<rect x='$(fmt $px)' y='$(fmt $pY)' width='$(fmt $pW)' height='$(fmt $pH)' fill='none' stroke='#555555' stroke-width='1' rx='3'/>")
-        $null = $sb.AppendLine((svgT ($px+$pW*0.5) ($pY+$pH*0.5+4) ($p+1) '#FFFFFF' 9))
+    # Pad mode (deck 1 — no mode active)
+    $mb1Y=$tb1Y+$tbH+4; $mb1x0=[double]$jog1cx-$mbRW/2.0
+    for ($m=0;$m-lt 4;$m++) {
+        $mx=[double]$mb1x0+[double]$m*($mbW+$mbSp); $mc=$modeColors[$m]
+        $null = $sb.AppendLine((svgR $mx $mb1Y $mbW $mbH '#222222' 2))
+        $null = $sb.AppendLine("<rect x='$(fmt $mx)' y='$(fmt $mb1Y)' width='$(fmt $mbW)' height='$(fmt $mbH)' fill='none' stroke='$mc' stroke-width='1' rx='2'/>")
+        $null = $sb.AppendLine((svgT ([double]$mx+$mbW*0.5) ([double]$mb1Y+$mbH*0.5+3.5) $modeLabels[$m] '#666666' 8))
     }
+
+    # 8 pads deck 1 (all dim, ch10, notes 0x00-0x07)
+    $pad1Y=[double]$mb1Y+$mbH+3
+    $hcFlash1=@(0.22,0.22,0.22,0.22,0.22,0.22,0.22,0.22)
+    djPads8 $sb $jog1cx $pad1Y $hcColors $hcFlash1
 
     $null = $sb.AppendLine("</svg>")
     $sb.ToString() | Set-Content $file -Encoding UTF8
@@ -836,6 +883,185 @@ function Write-SynthSvg($file) {
 }
 
 Write-SynthSvg "$OutDir\synth-dm12.svg"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. DAW SESSION VIEW helpers — Ableton Live Session View   720 × 400
+# ─────────────────────────────────────────────────────────────────────────────
+
+function dawClip($x,$y,$w,$h,$name,$playing,$hasClip,$col) {
+    $out = [System.Collections.Generic.List[string]]::new()
+    if (-not $hasClip) {
+        # Empty slot — dim trough
+        $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='#0D0D0D' rx='2'/>")
+        $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='none' stroke='#1E1E1E' stroke-width='1' rx='2'/>")
+        return $out
+    }
+    $bgCol  = if ($playing) { '#1A3A1A' } else { '#1C1C2A' }
+    $brdCol = if ($playing) { '#00CC44' } else { $col }
+    $txtCol = if ($playing) { '#00FF55' } else { '#AAAAAA' }
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='$bgCol' rx='2'/>")
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='none' stroke='$brdCol' stroke-width='1' rx='2'/>")
+    if ($playing) {
+        # Left play stripe
+        $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='3' height='$(fmt $h)' fill='#00CC44' rx='1'/>")
+        # Play triangle
+        $tx = $x + 7; $ty = $y + $h/2
+        $out.Add("<polygon points='$(fmt $tx),$(fmt ($ty-4)) $(fmt ($tx+7)),$(fmt $ty) $(fmt $tx),$(fmt ($ty+4))' fill='#00FF55'/>")
+    }
+    # Clip name (truncated)
+    $maxW   = $w - 18
+    $short  = if ($name.Length -gt 9) { $name.Substring(0,9) } else { $name }
+    $txOffset = if ($playing) { $x + 18 } else { $x + 6 }
+    $out.Add("<text x='$(fmt $txOffset)' y='$(fmt ($y+$h*0.5+4))' fill='$txtCol' font-family='Courier New,monospace' font-size='8px'>$short</text>")
+    return $out
+}
+
+function dawMeter($x,$y,$w,$h,$level,$peak,$col) {
+    $out  = [System.Collections.Generic.List[string]]::new()
+    $out.Add("<rect x='$(fmt $x)' y='$(fmt $y)' width='$(fmt $w)' height='$(fmt $h)' fill='#0A0A0A' rx='1'/>")
+    $fillH = $level * ($h - 2)
+    if ($fillH -gt 1) {
+        $fy = $y + $h - 1 - $fillH
+        # Color-coded fill (green/orange/red)
+        $mc  = if ($level -gt 0.88) { '#FF2222' } elseif ($level -gt 0.70) { '#FFAA00' } else { $col }
+        $out.Add("<rect x='$(fmt ($x+1))' y='$(fmt $fy)' width='$(fmt ($w-2))' height='$(fmt $fillH)' fill='$mc' rx='1'/>")
+    }
+    # Peak hold hairline
+    if ($peak -gt 0.01) {
+        $py = $y + $h - 1 - $peak*($h-2) - 1
+        $out.Add("<rect x='$(fmt ($x+1))' y='$(fmt $py)' width='$(fmt ($w-2))' height='1.5' fill='#FFFFFF88'/>")
+    }
+    return $out
+}
+
+function dawAdd($sb, $lines) { foreach ($l in $lines) { $null = $sb.AppendLine($l) } }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 15. Write Ableton Session View SVG
+# ─────────────────────────────────────────────────────────────────────────────
+function Write-DawSvg($file) {
+    $W = 720; $H = 400
+    $sb = [System.Text.StringBuilder]::new()
+    $null = $sb.AppendLine("<?xml version='1.0' encoding='UTF-8'?>")
+    $null = $sb.AppendLine("<svg width='$W' height='$H' viewBox='0 0 $W $H' xmlns='http://www.w3.org/2000/svg'>")
+
+    # Canvas background
+    $null = $sb.AppendLine("<rect width='$W' height='$H' fill='#111111'/>")
+
+    # Layout constants
+    $HEADER_H  = 36
+    $TRKNAME_H = 22
+    $SCENE_W   = 72
+    $METER_H   = 42
+    $CLIP_AREA_Y = $HEADER_H + $TRKNAME_H
+    $CLIP_AREA_H = $H - $CLIP_AREA_Y - $METER_H
+    $NUM_TRACKS  = 6
+    $NUM_SCENES  = 5
+    $TRACK_W  = [int](($W - $SCENE_W) / $NUM_TRACKS)
+    $SCENE_H  = [int]($CLIP_AREA_H / $NUM_SCENES)
+    $CLIP_PAD = 2
+
+    # Track accent colours
+    $trackCols = @('#FF4444','#FF8800','#FFDD00','#44CC44','#00AAFF','#AA44FF')
+
+    # Sample session state — mix of playing, queued, empty
+    $trackNames  = @('KICK','BASS','SYNTH','KEYS','PERC','PAD')
+    $sceneNames  = @('INTRO','VERSE','CHORUS','BRIDGE','OUTRO')
+
+    # [track][scene] clip data: (name, playing, hasClip)
+    $clips = @(
+        @(@('K-INTRO',$true,$true),  @('K-VERSE',$false,$true), @('K-CHORUS',$false,$true), @('',$false,$false), @('',$false,$false)),
+        @(@('BASS-DRP',$true,$true),  @('BASS-V',$false,$true),  @('BASS-C',$false,$true),   @('BASS-BRG',$false,$true), @('',$false,$false)),
+        @(@('PAD SWEEP',$false,$true),@('SYNTH-V',$false,$true), @('LEAD',$true,$true),       @('SYNTH-B',$false,$true),  @('',$false,$false)),
+        @(@('',$false,$false),        @('KEYS-V',$false,$true),  @('KEYS-C',$true,$true),     @('KEYS-B',$false,$true),   @('KEYS-OUT',$false,$true)),
+        @(@('PERC-I',$false,$true),   @('PERC-V',$false,$true),  @('PERC-C',$false,$true),    @('',$false,$false),        @('',$false,$false)),
+        @(@('',$false,$false),        @('',$false,$false),        @('STRINGS',$true,$true),    @('PAD-B',$false,$true),    @('LONG PAD',$false,$true))
+    )
+
+    # Level & peak data per track (0.0–1.0)
+    $levels = @(0.72, 0.58, 0.45, 0.62, 0.38, 0.81)
+    $peaks  = @(0.85, 0.70, 0.60, 0.78, 0.55, 0.88)
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    $null = $sb.AppendLine("<rect x='0' y='0' width='$W' height='$HEADER_H' fill='#0A1A10'/>")
+    $null = $sb.AppendLine("<text x='10' y='24' fill='#00CC44' font-family='Courier New,monospace' font-size='14px' font-weight='bold'>ABLETON LIVE</text>")
+    # Playing indicator
+    $null = $sb.AppendLine("<polygon points='130,12 130,26 143,19' fill='#00FF55'/>")
+    $null = $sb.AppendLine("<text x='150' y='24' fill='#CCCCCC' font-family='Courier New,monospace' font-size='13px'>PLAYING</text>")
+    # BPM
+    $null = $sb.AppendLine("<text x='360' y='14' fill='#888888' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>BPM</text>")
+    $null = $sb.AppendLine("<text x='360' y='28' fill='#FFFFFF' font-family='Courier New,monospace' font-size='15px' font-weight='bold' text-anchor='middle'>128.00</text>")
+    # Beat position
+    $null = $sb.AppendLine("<text x='450' y='14' fill='#888888' font-family='Courier New,monospace' font-size='9px' text-anchor='middle'>BAR.BEAT</text>")
+    $null = $sb.AppendLine("<text x='450' y='28' fill='#AAFFAA' font-family='Courier New,monospace' font-size='13px' font-weight='bold' text-anchor='middle'>005.03</text>")
+    # OSC port indicator
+    $null = $sb.AppendLine("<text x='$(fmt ($W-8))' y='17' fill='#00AAFF' font-family='Courier New,monospace' font-size='8px' text-anchor='end'>OSC :11000</text>")
+    $null = $sb.AppendLine("<circle cx='$(fmt ($W-124))' cy='13' r='4' fill='#00CC44'/>")
+
+    # ── Scene name column + Track name headers ────────────────────────────────
+    $null = $sb.AppendLine("<rect x='0' y='$HEADER_H' width='$SCENE_W' height='$TRKNAME_H' fill='#181818'/>")
+    $null = $sb.AppendLine("<text x='$(fmt ($SCENE_W*0.5))' y='$(fmt ($HEADER_H+15))' fill='#555555' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>SCENES</text>")
+
+    for ($t = 0; $t -lt $NUM_TRACKS; $t++) {
+        $tx = $SCENE_W + $t * $TRACK_W
+        $tc = $trackCols[$t]
+        $null = $sb.AppendLine("<rect x='$(fmt $tx)' y='$HEADER_H' width='$(fmt $TRACK_W)' height='$TRKNAME_H' fill='${tc}22'/>")
+        $null = $sb.AppendLine("<rect x='$(fmt $tx)' y='$HEADER_H' width='$(fmt $TRACK_W)' height='2' fill='$tc'/>")
+        $null = $sb.AppendLine("<text x='$(fmt ($tx+$TRACK_W*0.5))' y='$(fmt ($HEADER_H+15))' fill='$tc' font-family='Courier New,monospace' font-size='9px' font-weight='bold' text-anchor='middle'>$($trackNames[$t])</text>")
+    }
+
+    # ── Clip grid ─────────────────────────────────────────────────────────────
+    for ($s = 0; $s -lt $NUM_SCENES; $s++) {
+        $sy   = $CLIP_AREA_Y + $s * $SCENE_H
+        $sEven = if ($s % 2 -eq 0) { '#151515' } else { '#131313' }
+        $null = $sb.AppendLine("<rect x='0' y='$(fmt $sy)' width='$W' height='$(fmt $SCENE_H)' fill='$sEven'/>")
+
+        # Scene name cell
+        $null = $sb.AppendLine("<rect x='0' y='$(fmt $sy)' width='$SCENE_W' height='$(fmt $SCENE_H)' fill='#161616'/>")
+        $null = $sb.AppendLine("<rect x='0' y='$(fmt $sy)' width='$SCENE_W' height='$(fmt $SCENE_H)' fill='none' stroke='#222222' stroke-width='1'/>")
+        $null = $sb.AppendLine("<text x='$(fmt ($SCENE_W*0.5))' y='$(fmt ($sy+$SCENE_H*0.5+4))' fill='#666666' font-family='Courier New,monospace' font-size='8px' text-anchor='middle'>$($sceneNames[$s])</text>")
+
+        # Clip cells per track
+        for ($t = 0; $t -lt $NUM_TRACKS; $t++) {
+            $cx2 = $SCENE_W + $t * $TRACK_W + $CLIP_PAD
+            $cy2 = $sy + $CLIP_PAD
+            $cw  = $TRACK_W - $CLIP_PAD * 2
+            $ch  = $SCENE_H - $CLIP_PAD * 2
+            $cd   = $clips[$t][$s]
+            $cname = $cd[0]; $cplay = $cd[1]; $chas = $cd[2]
+            dawAdd $sb (dawClip $cx2 $cy2 $cw $ch $cname $cplay $chas $trackCols[$t])
+        }
+    }
+
+    # ── Level meters ──────────────────────────────────────────────────────────
+    $METER_Y = $H - $METER_H
+    $null = $sb.AppendLine("<rect x='0' y='$METER_Y' width='$W' height='$METER_H' fill='#0C0C0C'/>")
+    $null = $sb.AppendLine("<rect x='0' y='$METER_Y' width='$W' height='1' fill='#2A2A2A'/>")
+
+    # Scene col spacer
+    $null = $sb.AppendLine("<rect x='0' y='$METER_Y' width='$SCENE_W' height='$METER_H' fill='#0A0A0A'/>")
+
+    for ($t = 0; $t -lt $NUM_TRACKS; $t++) {
+        $mx = $SCENE_W + $t * $TRACK_W
+        $tc = $trackCols[$t]
+        # Track name mini label
+        $null = $sb.AppendLine("<text x='$(fmt ($mx+$TRACK_W*0.5))' y='$(fmt ($METER_Y+10))' fill='#444444' font-family='Courier New,monospace' font-size='7px' text-anchor='middle'>$($trackNames[$t])</text>")
+        # Two meter bars (L+R) side by side in the track column
+        $mBarW = [int](($TRACK_W - 14) / 2)
+        $mL    = $mx + 5
+        $mR    = $mL + $mBarW + 4
+        $mY    = $METER_Y + 13
+        $mH    = $METER_H - 16
+        dawAdd $sb (dawMeter $mL $mY $mBarW $mH ($levels[$t]*0.95) ($peaks[$t]*0.93) $tc)
+        dawAdd $sb (dawMeter $mR $mY $mBarW $mH ($levels[$t])      ($peaks[$t])      $tc)
+    }
+
+    $null = $sb.AppendLine("</svg>")
+    $sb.ToString() | Set-Content $file -Encoding UTF8
+    Write-Host "$(Split-Path $file -Leaf) done"
+}
+
+Write-DawSvg "$OutDir\daw-session.svg"
 
 Write-Host "All mockup SVGs written to $OutDir"
 

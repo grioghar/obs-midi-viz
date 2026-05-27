@@ -93,15 +93,35 @@ namespace DM12 { enum : int {
     COUNT
 }; }
 // ── Korg DSS-1 ──────
+// The DSS-1 is a sampling synthesizer — it has no DCOs.
+// Sources are PCM samples loaded from disk/cartridge, not analog oscillators.
+// MIDI SysEx: F0 42 [0x30|ch] 02 [func] [data] F7  (device ID = 0x02)
 namespace DSS1 { enum : int {
-    DCO1_OCT=0, DCO1_TUN, DCO1_WV, DCO1_LVL,
-    DCO2_OCT,   DCO2_TUN, DCO2_WV, DCO2_LVL,
-    DCF_CUT,    DCF_RES,  DCF_ENV, DCF_KEY,
-    ENV1_A, ENV1_D, ENV1_S, ENV1_R,
-    ENV2_A, ENV2_D, ENV2_S, ENV2_R,
-    LFO_RT, LFO_DP, LFO_DL,
-    ARP_ON, ARP_MD, ARP_OCT,
-    VCA_LVL, PORTA,
+    // Source section (sample-based, not DCO)
+    SRC_OCT=0,    // octave transpose (-3..+3 stored 0-6, centre=3)
+    SRC_TUNE,     // semitone tuning (0-12)
+    SRC_WV,       // waveform / sample number (0-63)
+    SRC_PORTA,    // portamento time (0-99)
+    // VDF — Voltage Dependent Filter (LPF)
+    VDF_CUT,      // cutoff frequency (0-99)
+    VDF_RES,      // resonance / EG intensity (0-99)
+    VDF_ENV,      // EG1→VDF amount, bipolar (0-99, 50=off)
+    VDF_KEY,      // keyboard tracking (0-3: 0=off)
+    VDF_LVL,      // filter level (0-99)
+    // VDA — Voltage Dependent Amplifier
+    VDA_LVL,      // output level (0-99)
+    VDA_ENV,      // EG2 → VDA amount (0-99)
+    // EG1 — Filter Envelope (A/D/S/R in 0-99 range)
+    EG1_A, EG1_D, EG1_S, EG1_R,
+    // EG2 — Amplifier Envelope
+    EG2_A, EG2_D, EG2_S, EG2_R,
+    // LFO
+    LFO_SPD,      // speed (0-99)
+    LFO_DLY,      // onset delay (0-99)
+    LFO_SHP,      // shape: 0=tri 1=saw 2=sq 3=random
+    LFO_PIT,      // pitch mod depth (0-99)
+    LFO_VDF,      // VDF mod depth (0-99)
+    LFO_VDA,      // VDA mod depth (0-99)
     COUNT
 }; }
 // ── Alesis QS7.1 ────
@@ -166,13 +186,15 @@ static void synth_set_defaults(SynthSource *s)
         p[DM12::ARP_ON]=0.00f;  p[DM12::ARP_MD]=0.00f;  p[DM12::ARP_RT]=0.35f;
         break;
     case SynthModel::KorgDSS1:
-        p[DSS1::DCO1_OCT]=0.50f; p[DSS1::DCO1_TUN]=0.50f; p[DSS1::DCO1_WV]=0.00f; p[DSS1::DCO1_LVL]=0.75f;
-        p[DSS1::DCO2_OCT]=0.50f; p[DSS1::DCO2_TUN]=0.53f; p[DSS1::DCO2_WV]=0.33f; p[DSS1::DCO2_LVL]=0.25f;
-        p[DSS1::DCF_CUT]=0.65f;  p[DSS1::DCF_RES]=0.25f;  p[DSS1::DCF_ENV]=0.50f; p[DSS1::DCF_KEY]=0.50f;
-        p[DSS1::ENV1_A]=0.10f;  p[DSS1::ENV1_D]=0.30f;  p[DSS1::ENV1_S]=0.70f;  p[DSS1::ENV1_R]=0.40f;
-        p[DSS1::ENV2_A]=0.00f;  p[DSS1::ENV2_D]=0.00f;  p[DSS1::ENV2_S]=1.00f;  p[DSS1::ENV2_R]=0.25f;
-        p[DSS1::LFO_RT]=0.30f;  p[DSS1::LFO_DP]=0.10f;  p[DSS1::LFO_DL]=0.50f;
-        p[DSS1::VCA_LVL]=0.80f; p[DSS1::PORTA]=0.00f;
+        p[DSS1::SRC_OCT]=0.50f; p[DSS1::SRC_TUNE]=0.50f;
+        p[DSS1::SRC_WV]=0.12f;  p[DSS1::SRC_PORTA]=0.00f;
+        p[DSS1::VDF_CUT]=0.65f; p[DSS1::VDF_RES]=0.25f;
+        p[DSS1::VDF_ENV]=0.55f; p[DSS1::VDF_KEY]=0.33f; p[DSS1::VDF_LVL]=0.80f;
+        p[DSS1::VDA_LVL]=0.85f; p[DSS1::VDA_ENV]=0.75f;
+        p[DSS1::EG1_A]=0.10f;  p[DSS1::EG1_D]=0.35f;  p[DSS1::EG1_S]=0.65f;  p[DSS1::EG1_R]=0.40f;
+        p[DSS1::EG2_A]=0.05f;  p[DSS1::EG2_D]=0.00f;  p[DSS1::EG2_S]=1.00f;  p[DSS1::EG2_R]=0.30f;
+        p[DSS1::LFO_SPD]=0.28f; p[DSS1::LFO_DLY]=0.45f; p[DSS1::LFO_SHP]=0.00f;
+        p[DSS1::LFO_PIT]=0.12f; p[DSS1::LFO_VDF]=0.18f; p[DSS1::LFO_VDA]=0.00f;
         break;
     case SynthModel::AlesisQS71:
         p[QS71::E1_LVL]=1.00f; p[QS71::E1_PAN]=0.50f; p[QS71::E1_PITCH]=0.50f; p[QS71::E1_TUN]=0.50f;
@@ -236,29 +258,66 @@ static bool dm12_parse(const std::vector<uint8_t> &m, float *p, char *name, int 
 
 static bool dss1_parse(const std::vector<uint8_t> &m, float *p, char *name, int nameSz)
 {
-    // Korg DSS-1 SysEx: F0 42 [ch|0x30] 03 [func=0x40] [data] F7
-    if (m.size() < 16 || m[0]!=0xF0 || m[1]!=0x42 || m[3]!=0x03) return false;
-    auto b = [&](size_t i) { return (i < m.size()) ? m[i] / 127.0f : 0.5f; };
-    if (name && m.size() > 14) {
+    // Korg DSS-1 Program Parameter Data:
+    // F0 42 [0x30|ch] 02 40 [name:10] [data...] F7
+    //   Byte 0: F0  Byte 1: 42 (Korg)  Byte 2: 0x30+ch  Byte 3: 02 (DSS-1 device ID)
+    //   Byte 4: function (0x40 = Program Param Data)
+    //   Bytes 5-14: patch name (10 ASCII chars)
+    //   Bytes 15+: parameter data (0-99 range per Korg DSS-1 manual, pp.5-8)
+    if (m.size() < 20 || m[0]!=0xF0 || m[1]!=0x42 || m[3]!=0x02) return false;
+
+    // normalise: DSS-1 uses 0-99 range for most continuous params
+    auto b99 = [&](size_t i) -> float {
+        return (i < m.size()-1) ? (float)m[i] / 99.0f : 0.5f;
+    };
+    auto b63 = [&](size_t i) -> float {
+        return (i < m.size()-1) ? (float)m[i] / 63.0f : 0.0f;
+    };
+    auto b3  = [&](size_t i) -> float {
+        return (i < m.size()-1) ? (float)(m[i] % 4) / 3.0f : 0.0f;
+    };
+
+    // Program name (10 chars at bytes 5-14)
+    if (name) {
         int ni = 0;
-        for (int i = 5; i < 13 && (size_t)i < m.size()-1; ++i) {
+        for (int i = 5; i < 15 && (size_t)i < m.size()-1; ++i) {
             uint8_t c = m[i];
             if (c >= 32 && c < 127) name[ni++] = (char)c;
         }
         name[ni] = '\0';
     }
-    const size_t B = 13;
-    p[DSS1::DCO1_OCT]=b(B+0);  p[DSS1::DCO1_TUN]=b(B+1);
-    p[DSS1::DCO1_WV]=(m.size()>B+2) ? (m[B+2]%4)/3.0f : 0.0f;
-    p[DSS1::DCO1_LVL]=b(B+3);
-    p[DSS1::DCO2_OCT]=b(B+8);  p[DSS1::DCO2_TUN]=b(B+9);
-    p[DSS1::DCO2_WV]=(m.size()>B+10) ? (m[B+10]%4)/3.0f : 0.0f;
-    p[DSS1::DCO2_LVL]=b(B+11);
-    p[DSS1::DCF_CUT]=b(B+16); p[DSS1::DCF_RES]=b(B+17); p[DSS1::DCF_ENV]=b(B+18); p[DSS1::DCF_KEY]=b(B+19);
-    p[DSS1::ENV1_A]=b(B+24);  p[DSS1::ENV1_D]=b(B+25);  p[DSS1::ENV1_S]=b(B+26);  p[DSS1::ENV1_R]=b(B+27);
-    p[DSS1::ENV2_A]=b(B+32);  p[DSS1::ENV2_D]=b(B+33);  p[DSS1::ENV2_S]=b(B+34);  p[DSS1::ENV2_R]=b(B+35);
-    p[DSS1::LFO_RT]=b(B+40);  p[DSS1::LFO_DP]=b(B+41);  p[DSS1::LFO_DL]=b(B+42);
-    p[DSS1::VCA_LVL]=b(B+48); p[DSS1::PORTA]=b(B+49);
+
+    // Parameter data starts at byte 15 (after 5-byte header + 10-byte name)
+    const size_t B = 15;
+    // Source section (manual p.5: Octave, Semitone, Waveform, Portamento)
+    p[DSS1::SRC_OCT]  = b99(B+0);        // 0-6, centre=3
+    p[DSS1::SRC_TUNE] = b99(B+1);        // 0-12 semitones
+    p[DSS1::SRC_WV]   = b63(B+3);        // waveform/sample 0-63
+    p[DSS1::SRC_PORTA] = b99(B+4);       // portamento time
+
+    // EG1 — Filter envelope (manual p.6: A/D/S/R, each 0-99)
+    p[DSS1::EG1_A]=b99(B+5); p[DSS1::EG1_D]=b99(B+6);
+    p[DSS1::EG1_S]=b99(B+7); p[DSS1::EG1_R]=b99(B+8);
+
+    // EG2 — Amp envelope (manual p.6)
+    p[DSS1::EG2_A]=b99(B+10); p[DSS1::EG2_D]=b99(B+11);
+    p[DSS1::EG2_S]=b99(B+12); p[DSS1::EG2_R]=b99(B+13);
+
+    // VDF — Voltage Dependent Filter (manual p.7: Cutoff/Resonance/EG/KeyTrack/Level)
+    p[DSS1::VDF_CUT]=b99(B+15); p[DSS1::VDF_RES]=b99(B+16);
+    p[DSS1::VDF_ENV]=b99(B+17); // bipolar EG amount; 50=centre
+    p[DSS1::VDF_KEY]=b3 (B+18); // 0-3: off/half/full/inverted
+    p[DSS1::VDF_LVL]=b99(B+19);
+
+    // VDA — Voltage Dependent Amplifier (manual p.7)
+    p[DSS1::VDA_LVL]=b99(B+20); p[DSS1::VDA_ENV]=b99(B+21);
+
+    // LFO (manual p.8: Speed/Delay/Shape/Pit/VDF/VDA depths)
+    p[DSS1::LFO_SPD]=b99(B+22); p[DSS1::LFO_DLY]=b99(B+23);
+    p[DSS1::LFO_SHP]=b3 (B+24); // 0=tri 1=saw 2=sq 3=random
+    p[DSS1::LFO_PIT]=b99(B+25); p[DSS1::LFO_VDF]=b99(B+26);
+    p[DSS1::LFO_VDA]=b99(B+27);
+
     return true;
 }
 
@@ -378,9 +437,13 @@ static void *synth_create(obs_data_t *settings, obs_source_t *src)
                 }
                 break;
             case SynthModel::KorgDSS1:
+                // DSS-1 responds to standard CCs for real-time control
                 switch (ev.param1) {
-                    case 74: s->params[DSS1::DCF_CUT] = ev.param2/127.0f; break;
-                    case 71: s->params[DSS1::DCF_RES] = ev.param2/127.0f; break;
+                    case  1: s->params[DSS1::LFO_PIT] = ev.param2/127.0f; break; // Mod wheel → LFO pitch depth
+                    case  7: s->params[DSS1::VDA_LVL] = ev.param2/127.0f; break; // Volume → VDA level
+                    case 65: s->params[DSS1::SRC_PORTA]= ev.param2/127.0f; break; // Portamento switch
+                    case 71: s->params[DSS1::VDF_RES] = ev.param2/127.0f; break; // CC71 → VDF resonance
+                    case 74: s->params[DSS1::VDF_CUT] = ev.param2/127.0f; break; // CC74 → VDF cutoff
                 }
                 break;
             default: break;
@@ -709,6 +772,8 @@ static void synth_render(void *data, gs_effect_t *effect)
     };
 
     // ── Korg DSS-1 panel ─────────────────────────────────────────────────────
+    // The DSS-1 is a sampling synthesizer — no DCOs. Sources are PCM waveforms.
+    // Panel layout: SOURCE | VDF | VDA  / EG1 | EG2  / LFO  / INFO
     auto renderDSS1 = [&]() {
         drawRect(0, 0, W, 36.0f, lerp(s->colorBg, 0xFF001A1A, 0.85f));
         drawText(10.0f, 14.0f, 2.0f, 0xFF00CCAA, "KORG DSS-1");
@@ -719,52 +784,66 @@ static void synth_render(void *data, gs_effect_t *effect)
           drawText(W-(float)sl*4.0f-8.0f, 14.0f, 1.0f,
                    s->paramsValid ? 0xFF00CC88 : 0xFF554444, st); }
 
-        const float R1Y=38.0f, R1H=108.0f, R2Y=148.0f, R2H=108.0f;
-        const float R3Y=258.0f, R3H=80.0f, R4Y=340.0f;
+        const float R1Y=38.0f, R1H=108.0f;
+        const float R2Y=148.0f, R2H=108.0f;
+        const float R3Y=258.0f, R3H=80.0f;
+        const float R4Y=340.0f, R4H=H-340.0f;
         auto kCY = [](float sy, float sh){ return sy+18.0f+(sh-18.0f)*0.5f; };
 
-        drawSectionBg(0,   R1Y, 180, R1H, "DCO1", 0xFF00CCAA);
+        // ── Row 1: SOURCE | VDF | VDA ────────────────────────────────────────
+        // SOURCE section (replacing DCO1/DCO2 — DSS-1 is sample-based)
+        drawSectionBg(0, R1Y, 270, R1H, "SOURCE (SAMPLE)", 0xFF00CCAA);
         { float ky=kCY(R1Y,R1H);
-          drawSynthKnob(35, ky,18,p[DSS1::DCO1_OCT],"OCT",0xFF00CCAA);
-          drawSynthKnob(90, ky,18,p[DSS1::DCO1_TUN],"TUN",0xFF00CCAA);
-          drawSynthKnob(135,ky,16,p[DSS1::DCO1_WV], "WV", 0xFF009988);
-          drawSynthKnob(163,ky,14,p[DSS1::DCO1_LVL],"LVL",0xFF009988); }
+          // Waveform number shown as a bar indicator
+          drawHBar(10, R1Y+24.0f, 200, 14, p[DSS1::SRC_WV], "WV#", 0xFF00CCAA);
+          drawSynthKnob(60, ky, 18, p[DSS1::SRC_OCT],  "OCT",  0xFF00CCAA);
+          drawSynthKnob(130,ky, 18, p[DSS1::SRC_TUNE], "TUNE", 0xFF00CCAA);
+          drawSynthKnob(200,ky, 14, p[DSS1::SRC_PORTA],"PORT", 0xFF009988); }
 
-        drawSectionBg(182, R1Y, 178, R1H, "DCO2", 0xFF00CCAA);
+        // VDF — Voltage Dependent Filter
+        drawSectionBg(272, R1Y, 270, R1H, "VDF (FILTER)", 0xFF0099FF);
         { float ky=kCY(R1Y,R1H);
-          drawSynthKnob(217,ky,18,p[DSS1::DCO2_OCT],"OCT",0xFF00CCAA);
-          drawSynthKnob(272,ky,18,p[DSS1::DCO2_TUN],"TUN",0xFF00CCAA);
-          drawSynthKnob(317,ky,16,p[DSS1::DCO2_WV], "WV", 0xFF009988);
-          drawSynthKnob(345,ky,14,p[DSS1::DCO2_LVL],"LVL",0xFF009988); }
+          drawSynthKnob(312,ky,18,p[DSS1::VDF_CUT],"CUT",0xFF0099FF);
+          drawSynthKnob(362,ky,18,p[DSS1::VDF_RES],"RES",0xFF0099FF);
+          drawSynthKnob(412,ky,18,p[DSS1::VDF_ENV],"ENV",0xFF3399FF);
+          drawSynthKnob(462,ky,16,p[DSS1::VDF_KEY],"KEY",0xFF224466);
+          drawSynthKnob(512,ky,14,p[DSS1::VDF_LVL],"LVL",0xFF116688); }
 
-        drawSectionBg(362, R1Y, 178, R1H, "DCF", 0xFF0099FF);
+        // VDA — Voltage Dependent Amplifier
+        drawSectionBg(544, R1Y, 176, R1H, "VDA (AMP)", 0xFF88CC44);
         { float ky=kCY(R1Y,R1H);
-          drawSynthKnob(392,ky,18,p[DSS1::DCF_CUT],"CUT",0xFF0099FF);
-          drawSynthKnob(437,ky,18,p[DSS1::DCF_RES],"RES",0xFF0099FF);
-          drawSynthKnob(482,ky,18,p[DSS1::DCF_ENV],"ENV",0xFF3399FF);
-          drawSynthKnob(527,ky,16,p[DSS1::DCF_KEY],"KEY",0xFF224466); }
+          drawSynthKnob(610,ky,22,p[DSS1::VDA_LVL],"LVL",0xFF88CC44);
+          drawSynthKnob(675,ky,18,p[DSS1::VDA_ENV],"ENV",0xFF55AA22); }
 
-        drawSectionBg(542, R1Y, 178, R1H, "DCA", 0xFF88CC44);
-        { float ky=kCY(R1Y,R1H);
-          drawSynthKnob(618,ky,22,p[DSS1::VCA_LVL],"LVL",0xFF88CC44);
-          drawSynthKnob(678,ky,18,p[DSS1::PORTA],  "PRT",0xFF55AA22); }
+        // ── Row 2: EG1 (VDF) | EG2 (VDA) ────────────────────────────────────
+        drawSectionBg(0,   R2Y, 360, R2H, "EG1  (VDF ENVELOPE)", 0xFF0099FF);
+        drawEnvelope(4,R2Y+20,352,R2H-24,
+                     p[DSS1::EG1_A],p[DSS1::EG1_D],p[DSS1::EG1_S],p[DSS1::EG1_R],0xFF0099FF);
 
-        drawSectionBg(0,   R2Y, 360, R2H, "ENV1", 0xFF0099FF);
-        drawEnvelope(4,R2Y+20,352,R2H-24,p[DSS1::ENV1_A],p[DSS1::ENV1_D],p[DSS1::ENV1_S],p[DSS1::ENV1_R],0xFF0099FF);
+        drawSectionBg(362, R2Y, 358, R2H, "EG2  (VDA ENVELOPE)", 0xFF88CC44);
+        drawEnvelope(366,R2Y+20,350,R2H-24,
+                     p[DSS1::EG2_A],p[DSS1::EG2_D],p[DSS1::EG2_S],p[DSS1::EG2_R],0xFF88CC44);
 
-        drawSectionBg(362, R2Y, 358, R2H, "ENV2 (AMP)", 0xFF88CC44);
-        drawEnvelope(366,R2Y+20,350,R2H-24,p[DSS1::ENV2_A],p[DSS1::ENV2_D],p[DSS1::ENV2_S],p[DSS1::ENV2_R],0xFF88CC44);
-
-        drawSectionBg(0,   R3Y, 270, R3H, "LFO", 0xFFCC88FF);
+        // ── Row 3: LFO ───────────────────────────────────────────────────────
+        // LFO has: speed, delay, shape, pitch/VDF/VDA depths
+        drawSectionBg(0, R3Y, W, R3H, "LFO", 0xFFCC88FF);
         { float ky=R3Y+18.0f+(R3H-18.0f)*0.5f;
-          drawSynthKnob(45, ky,16,p[DSS1::LFO_RT],"RT",0xFFCC88FF);
-          drawSynthKnob(135,ky,16,p[DSS1::LFO_DP],"DP",0xFFCC88FF);
-          drawSynthKnob(225,ky,16,p[DSS1::LFO_DL],"DL",0xFF9955CC); }
+          drawSynthKnob( 50,ky,16,p[DSS1::LFO_SPD],"SPD",0xFFCC88FF);
+          drawSynthKnob(130,ky,16,p[DSS1::LFO_DLY],"DLY",0xFF9955CC);
+          drawSynthKnob(210,ky,16,p[DSS1::LFO_SHP],"SHP",0xFF9955CC);
+          // Depth bars: Pitch, VDF, VDA
+          float bx=290.0f, by=R3Y+24.0f;
+          drawHBar(bx,    by,    130, 12, p[DSS1::LFO_PIT],"PIT",0xFFFFDD44);
+          drawHBar(bx,    by+18, 130, 12, p[DSS1::LFO_VDF],"VDF",0xFF4499FF);
+          drawHBar(bx,    by+36, 130, 12, p[DSS1::LFO_VDA],"VDA",0xFF88CC44); }
 
-        drawSectionBg(272, R3Y, 448, R3H, "ARP / INFO", 0xFF554444);
-        { char inf[48];
-          snprintf(inf,sizeof(inf),"CH %d  PORT %d",s->midiChannel+1,s->midiPort);
-          drawText(278,R3Y+24.0f,1.0f,0xFF666666,inf); }
+        // ── Row 4: INFO ──────────────────────────────────────────────────────
+        drawSectionBg(0, R4Y, W, R4H, "INFO", 0xFF2A2A2A);
+        { char inf[64];
+          snprintf(inf,sizeof(inf),
+                   "CH %d  PORT %d     SysEx: F0 42 3%Xh 02h",
+                   s->midiChannel+1, s->midiPort, s->midiChannel);
+          drawText(10, R4Y+20.0f, 1.0f, 0xFF555555, inf); }
     };
 
     // ── Alesis QS7.1 panel ───────────────────────────────────────────────────

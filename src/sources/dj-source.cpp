@@ -62,42 +62,69 @@ static int djFontIdx(char c)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Default MIDI CC assignments — Pioneer DDJ-FLX4
-// All values are 0-indexed CC numbers; can be changed via properties.
+// Pioneer DDJ-FLX4 MIDI assignments — verified against official MIDI message
+// list (DDJ-FLX4_MIDI_message_List_E1.pdf) and Mixxx mapping XML.
+//
+// MIDI channel structure (0-indexed):
+//   ch 0  (MIDI 1)  — Deck 1 transport / EQ / faders  (status 0x90/0xB0)
+//   ch 1  (MIDI 2)  — Deck 2 transport / EQ / faders  (status 0x91/0xB1)
+//   ch 6  (MIDI 7)  — Mixer: crossfader, filter, head  (status 0xB6)
+//   ch 7  (MIDI 8)  — Pads Deck 1 press               (status 0x97)
+//   ch 8  (MIDI 9)  — Pads Deck 1 +SHIFT              (status 0x98)
+//   ch 9  (MIDI 10) — Pads Deck 2 press               (status 0x99)
+//   ch 10 (MIDI 11) — Pads Deck 2 +SHIFT              (status 0x9A)
+//
+// All 14-bit (MSB+LSB) controls: we track only MSB for display (7-bit resolution)
 // ─────────────────────────────────────────────────────────────────────────────
-static constexpr int kCC_EqHigh  = 19;
-static constexpr int kCC_EqMid   = 23;
-static constexpr int kCC_EqLow   = 27;
-static constexpr int kCC_Gain    = 8;
-static constexpr int kCC_Filter  = 21;
-static constexpr int kCC_Volume  = 7;
-static constexpr int kCC_Tempo   = 0;
-static constexpr int kCC_Jog     = 32;  // relative: 1–63=CW, 65–127=CCW
-static constexpr int kCC_Xfader  = 10;
 
-static constexpr int kNote_Play  = 11;
-static constexpr int kNote_Cue   = 12;
-static constexpr int kNote_Sync  = 13;
-static constexpr int kNote_Loop  = 16;
-static constexpr int kNote_HCue0 = 40;  // hot cues 1–4 = notes 40–43
+// ── Deck channel CCs (0x00–0x1F = MSB, 0x20–0x3F = matching LSB) ────────────
+static constexpr int kCC_Tempo     = 0x00;  //  0 — Tempo fader MSB
+static constexpr int kCC_Gain      = 0x04;  //  4 — Trim/Pregain MSB
+static constexpr int kCC_EqHigh    = 0x07;  //  7 — EQ HI MSB  (centre detent)
+static constexpr int kCC_EqMid     = 0x0B;  // 11 — EQ MID MSB (centre detent)
+static constexpr int kCC_EqLow     = 0x0F;  // 15 — EQ LOW MSB (centre detent)
+static constexpr int kCC_Volume    = 0x13;  // 19 — Channel fader MSB
+// Jog wheel CCs (relative; val ≤ 0x3F = +delta, val ≥ 0x41 = –delta)
+static constexpr int kCC_JogVinyl  = 0x22;  // 34 — Jog platter (vinyl/scratch mode)
+static constexpr int kCC_JogPitch  = 0x23;  // 35 — Jog platter (pitch-bend mode)
+static constexpr int kCC_JogSide   = 0x21;  // 33 — Jog side strip (pitch nudge)
+
+// ── Master channel CCs (all on ch 6 / MIDI 7, status 0xB6) ─────────────────
+static constexpr int kCC_FilterCh1 = 0x17;  // 23 — Quick Effect / Filter CH1
+static constexpr int kCC_FilterCh2 = 0x18;  // 24 — Quick Effect / Filter CH2
+static constexpr int kCC_Xfader    = 0x1F;  // 31 — Crossfader MSB
+
+// ── Transport note numbers (on deck channels 0 / 1) ─────────────────────────
+static constexpr int kNote_Play    = 0x0B;  // 11 — PLAY / PAUSE
+static constexpr int kNote_Cue     = 0x0C;  // 12 — CUE (set/goto cue point)
+static constexpr int kNote_Sync    = 0x58;  // 88 — BEAT SYNC
+static constexpr int kNote_LoopIn  = 0x10;  // 16 — LOOP IN
+static constexpr int kNote_LoopOut = 0x11;  // 17 — LOOP OUT
+static constexpr int kNote_Reloop  = 0x4D;  // 77 — RELOOP / EXIT
+
+// ── Performance pads (on pad channels; notes 0x00–0x07 in Hot Cue mode) ─────
+static constexpr int kNote_HCue0   = 0x00;  //  0 — Hot Cue 1 (pads 1–8 = 0–7)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-deck state
 // ─────────────────────────────────────────────────────────────────────────────
 struct DeckState {
-    float eqHigh     = 0.50f;  // 0=min, 1=max; EQ knobs use center-detent
-    float eqMid      = 0.50f;
-    float eqLow      = 0.50f;
-    float gain       = 0.50f;
-    float filter     = 0.50f;
-    float volume     = 0.75f;
-    float tempo      = 0.50f;  // 0.5 = 0% pitch
-    float jogAngle   = 0.0f;   // degrees, 0-360
-    bool  playing    = false;
-    bool  cueActive  = false;
-    bool  syncActive = false;
-    bool  loopActive = false;
-    float hotCueFlash[4] = {};
+    float eqHigh        = 0.50f;   // centre-detent EQ knobs
+    float eqMid         = 0.50f;
+    float eqLow         = 0.50f;
+    float gain          = 0.50f;   // Trim / Pregain
+    float filter        = 0.50f;   // Quick Filter (from master ch)
+    float volume        = 0.75f;   // Channel fader
+    float tempo         = 0.50f;   // 0.5 = 0% pitch-shift
+    float jogAngle      = 0.0f;    // degrees 0-360
+    bool  playing       = false;
+    bool  cueActive     = false;
+    bool  syncActive    = false;
+    bool  loopInActive  = false;   // LOOP IN button
+    bool  loopOutActive = false;   // LOOP OUT button
+    bool  reloopActive  = false;   // RELOOP / EXIT button
+    int   padMode       = 0;       // 0=HotCue 1=BeatLoop 2=BeatJump 3=Sampler
+    float hotCueFlash[8] = {};     // FLX4 has 8 performance pads
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,9 +135,13 @@ struct DjSource {
     float     xfader        = 0.50f;
 
     int       midiPort      = -1;
-    int       midiChDeck0   = 0;   // 0-indexed MIDI channels
-    int       midiChDeck1   = 1;
-    int       midiChMaster  = 5;
+    // Transport / EQ / fader channels (0-indexed MIDI channels)
+    int       midiChDeck0   = 0;   // Deck 1: MIDI ch 1 → ch 0 (status 0x90/0xB0)
+    int       midiChDeck1   = 1;   // Deck 2: MIDI ch 2 → ch 1 (status 0x91/0xB1)
+    int       midiChMaster  = 6;   // Mixer:  MIDI ch 7 → ch 6 (status 0xB6)
+    // Pad channels — fixed by FLX4 hardware (not user-configurable)
+    int       midiChPad0    = 7;   // Pads Deck 1 press: MIDI ch 8  (status 0x97)
+    int       midiChPad1    = 9;   // Pads Deck 2 press: MIDI ch 10 (status 0x99)
     uint32_t  midiHandle    = 0;
 
     uint32_t  cx = 1280;
@@ -161,9 +192,9 @@ static void dj_set_defaults(obs_data_t *settings)
     obs_data_set_default_int(settings, "canvas_w",  1280);
     obs_data_set_default_int(settings, "canvas_h",   480);
     obs_data_set_default_int(settings, "midi_port",   -1);
-    obs_data_set_default_int(settings, "deck0_ch",     1);
-    obs_data_set_default_int(settings, "deck1_ch",     2);
-    obs_data_set_default_int(settings, "master_ch",    6);
+    obs_data_set_default_int(settings, "deck0_ch",     1);  // MIDI ch 1
+    obs_data_set_default_int(settings, "deck1_ch",     2);  // MIDI ch 2
+    obs_data_set_default_int(settings, "master_ch",    7);  // MIDI ch 7 (crossfader/filter)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,65 +216,101 @@ static void *dj_create(obs_data_t *settings, obs_source_t *source)
 
             const int ch = (int)ev.channel;
 
-            // ── CC → knob / fader / jog ──────────────────────────────────
+            // ── CC → knobs / faders / jog ─────────────────────────────────
             if (ev.type == MidiEventType::ControlChange) {
-                int deckIdx = -1;
-                if (ch == s->midiChDeck0)  deckIdx = 0;
-                else if (ch == s->midiChDeck1)  deckIdx = 1;
-
                 const float val = ev.param2 / 127.0f;
 
+                // Deck-specific CCs (transport channel for each deck)
+                int deckIdx = (ch == s->midiChDeck0) ? 0
+                            : (ch == s->midiChDeck1) ? 1 : -1;
                 if (deckIdx >= 0) {
                     DeckState &dk = s->deck[deckIdx];
                     switch ((int)ev.param1) {
-                        case kCC_EqHigh:  dk.eqHigh  = val; break;
-                        case kCC_EqMid:   dk.eqMid   = val; break;
-                        case kCC_EqLow:   dk.eqLow   = val; break;
-                        case kCC_Gain:    dk.gain     = val; break;
-                        case kCC_Filter:  dk.filter   = val; break;
-                        case kCC_Volume:  dk.volume   = val; break;
-                        case kCC_Tempo:   dk.tempo    = val; break;
-                        case kCC_Jog: {
-                            // Relative encoder: 1–63=CW (+delta), 65–127=CCW (-(128-raw))
-                            int raw = (int)ev.param2;
-                            float delta = (raw <= 63) ? (float)raw
-                                                      : -(float)(128 - raw);
-                            // 128 ticks ≈ one full visual revolution
+                        case kCC_EqHigh: dk.eqHigh  = val; break;
+                        case kCC_EqMid:  dk.eqMid   = val; break;
+                        case kCC_EqLow:  dk.eqLow   = val; break;
+                        case kCC_Gain:   dk.gain     = val; break;
+                        case kCC_Volume: dk.volume   = val; break;
+                        case kCC_Tempo:  dk.tempo    = val; break;
+                        // Jog wheel — relative encoder (value ≤ 0x3F = CW, ≥ 0x41 = CCW)
+                        case kCC_JogVinyl:
+                        case kCC_JogPitch:
+                        case kCC_JogSide: {
+                            int raw   = (int)ev.param2;
+                            float delta = (raw <= 0x3F) ? (float)raw
+                                                        : -(float)(0x80 - raw);
+                            // ~128 ticks per visual revolution
                             dk.jogAngle = fmodf(dk.jogAngle + delta * 2.8125f, 360.0f);
                             if (dk.jogAngle < 0.0f) dk.jogAngle += 360.0f;
                             break;
                         }
                         default: break;
                     }
-                } else if (ch == s->midiChMaster) {
-                    if ((int)ev.param1 == kCC_Xfader) s->xfader = val;
+                }
+                // Master-channel CCs (crossfader, per-channel filter)
+                else if (ch == s->midiChMaster) {
+                    switch ((int)ev.param1) {
+                        case kCC_FilterCh1: s->deck[0].filter = val; break;
+                        case kCC_FilterCh2: s->deck[1].filter = val; break;
+                        case kCC_Xfader:    s->xfader          = val; break;
+                        default: break;
+                    }
                 }
             }
 
-            // ── Note On/Off → transport buttons + hot cues ───────────────
+            // ── Note On/Off → transport buttons ───────────────────────────
             if (ev.type == MidiEventType::NoteOn ||
                 ev.type == MidiEventType::NoteOff)
             {
-                int deckIdx = -1;
-                if (ch == s->midiChDeck0)  deckIdx = 0;
-                else if (ch == s->midiChDeck1)  deckIdx = 1;
-                if (deckIdx < 0) return;
+                const bool on   = (ev.type == MidiEventType::NoteOn && ev.param2 > 0);
+                const int  note = (int)ev.param1;
 
-                DeckState &dk = s->deck[deckIdx];
-                const bool on = (ev.type == MidiEventType::NoteOn &&
-                                 ev.param2 > 0);
-                const int note = (int)ev.param1;
-
-                switch (note) {
-                    case kNote_Play: dk.playing    = on; break;
-                    case kNote_Cue:  dk.cueActive  = on; break;
-                    case kNote_Sync: dk.syncActive = on; break;
-                    case kNote_Loop: dk.loopActive = on; break;
-                    default: break;
+                // Transport channel notes (play, cue, sync, loop controls)
+                int deckIdx = (ch == s->midiChDeck0) ? 0
+                            : (ch == s->midiChDeck1) ? 1 : -1;
+                if (deckIdx >= 0) {
+                    DeckState &dk = s->deck[deckIdx];
+                    switch (note) {
+                        case kNote_Play:    dk.playing       = on; break;
+                        case kNote_Cue:     dk.cueActive     = on; break;
+                        case kNote_Sync:    dk.syncActive    = on; break;
+                        case kNote_LoopIn:  dk.loopInActive  = on; break;
+                        case kNote_LoopOut: dk.loopOutActive = on; break;
+                        case kNote_Reloop:  dk.reloopActive  = on; break;
+                        default: break;
+                    }
+                    return;
                 }
-                if (note >= kNote_HCue0 && note < kNote_HCue0 + 4) {
-                    int hc = note - kNote_HCue0;
-                    dk.hotCueFlash[hc] = on ? (ev.param2 / 127.0f) : 0.0f;
+
+                // Pad channel notes (Hot Cues / Beat Loop / Beat Jump / Sampler)
+                // FLX4 uses dedicated pad channels (ch7/ch9) separate from transport
+                int padDeck = (ch == s->midiChPad0) ? 0
+                            : (ch == s->midiChPad1) ? 1 : -1;
+                if (padDeck >= 0) {
+                    DeckState &dk = s->deck[padDeck];
+                    // Hot cue pad range: notes 0x00–0x07 (pads 1–8)
+                    if (note >= kNote_HCue0 && note < kNote_HCue0 + 8) {
+                        int hc = note - kNote_HCue0;
+                        dk.hotCueFlash[hc] = on ? (ev.param2 / 127.0f) : 0.0f;
+                    }
+                    // Beat loop pads: notes 0x60–0x67 (pads 1–8 in loop mode)
+                    else if (note >= 0x60 && note <= 0x67) {
+                        int hc = note - 0x60;
+                        dk.hotCueFlash[hc] = on ? 0.8f : 0.0f;
+                        if (on) dk.padMode = 1;
+                    }
+                    // Beat jump pads: notes 0x20–0x27
+                    else if (note >= 0x20 && note <= 0x27) {
+                        int hc = note - 0x20;
+                        dk.hotCueFlash[hc] = on ? 0.6f : 0.0f;
+                        if (on) dk.padMode = 2;
+                    }
+                    // Sampler pads: notes 0x30–0x37
+                    else if (note >= 0x30 && note <= 0x37) {
+                        int hc = note - 0x30;
+                        dk.hotCueFlash[hc] = on ? 0.7f : 0.0f;
+                        if (on) dk.padMode = 3;
+                    }
                 }
             }
         });
@@ -270,10 +337,10 @@ static void dj_tick(void *data, float seconds)
     auto *s = static_cast<DjSource *>(data);
     MidiEngine::instance().drainQueue();
 
-    // Decay hot-cue flash (fast — purely cosmetic "hit" indicator)
+    // Decay hot-cue / pad flash (fast cosmetic "hit" indicator)
     constexpr float kHCDecay = 8.0f;
     for (int d = 0; d < 2; ++d)
-        for (int h = 0; h < 4; ++h)
+        for (int h = 0; h < 8; ++h)   // FLX4 has 8 pads
             if (s->deck[d].hotCueFlash[h] > 0.0f)
                 s->deck[d].hotCueFlash[h] = std::max(
                     0.0f, s->deck[d].hotCueFlash[h] - kHCDecay * seconds);
@@ -489,109 +556,144 @@ static void dj_render(void *data, gs_effect_t *effect)
     };
 
     // ── Per-deck drawing (called for both decks) ──────────────────────────────
-    // xOff   : left edge of the 560-px deck zone in canvas coordinates
-    // mirrored: deck 1 swaps knob/fader sides
+    // xOff    : left edge of the 560-px deck zone
+    // mirrored: deck 1 flips knob/fader sides (mirrors deck 0 layout)
+    //
+    // Accurate DDJ-FLX4 layout:
+    //   TEMPO fader — outer edge (far left for deck 0, far right for deck 1)
+    //   JOG WHEEL  — dominant centre
+    //   KNOB COLUMN — inner side of jog (EQ Hi/Mid/Low + Trim + Filter)
+    //   CHANNEL FADER — between knob column and mixer
+    //   Below jog: [LOOP-IN | RELOOP | LOOP-OUT] then [PLAY | CUE | SYNC]
+    //   Pad mode row: [HC | LOOP | JUMP | SAMP]
+    //   8 performance pads in 2×4 grid
     auto drawDeck = [&](float xOff, const DeckState &dk, bool mirrored) {
-        const float DW  = 560.0f;
+        const float DW = 560.0f;
 
-        // Deck background
+        // ── Background & border ────────────────────────────────────────────
         drawRect(xOff, 0.0f, DW, H, s->colorDeck);
+        if (mirrored) drawRect(xOff,            0.0f, 2.0f, H, 0xFF3A3A3A);
+        else          drawRect(xOff + DW - 2.0f, 0.0f, 2.0f, H, 0xFF3A3A3A);
 
-        // Separator line on the mixer-facing edge
-        if (mirrored)
-            drawRect(xOff, 0.0f, 2.0f, H, 0xFF3A3A3A);
-        else
-            drawRect(xOff + DW - 2.0f, 0.0f, 2.0f, H, 0xFF3A3A3A);
-
-        // ── Jog wheel ─────────────────────────────────────────────────────
-        // Deck 0: jog slightly left of centre so controls fit on the right.
-        // Deck 1: mirrored — jog slightly right of centre.
+        // ── Jog wheel — slightly smaller than original to fit controls below ─
+        // FLX4 has a 5.7-inch jog; deck 0 jog centre at x=230, deck 1 at x=330
         const float jogCx = mirrored ? (xOff + 330.0f) : (xOff + 230.0f);
-        const float jogCy = H * 0.47f;
-        const float jogR  = std::min(H * 0.40f, 130.0f);
+        const float jogCy = H * 0.395f;   // ~190 px at H=480
+        const float jogR  = std::min(H * 0.228f, 110.0f);
         drawJog(jogCx, jogCy, jogR, dk.jogAngle, dk.playing);
 
-        // ── Knob column ───────────────────────────────────────────────────
-        // Deck 0: knobs on the right. Deck 1: knobs on the left.
+        // ── Knob column ────────────────────────────────────────────────────
+        // Deck 0: knobs right-of-jog (inner side). Deck 1: mirrored left.
         const float knobX  = mirrored ? (xOff + 136.0f) : (xOff + DW - 136.0f);
         const float knobR  = 22.0f;
         const float knobR2 = 18.0f;
         const float lblS   = 1.0f;
 
-        // EQ High
-        drawKnob(knobX, 82.0f, knobR, dk.eqHigh, s->colorAccent, true);
-        drawText(knobX - 4.0f, 56.0f, lblS, s->colorText, "HI");
+        drawKnob(knobX,  76.0f, knobR,  dk.eqHigh, s->colorAccent, true);
+        drawText(knobX -  4.0f, 50.0f, lblS, s->colorText, "HI");
 
-        // EQ Mid
-        drawKnob(knobX, 157.0f, knobR, dk.eqMid, s->colorAccent, true);
-        drawText(knobX - 7.0f, 131.0f, lblS, s->colorText, "MID");
+        drawKnob(knobX, 150.0f, knobR,  dk.eqMid,  s->colorAccent, true);
+        drawText(knobX -  7.0f,124.0f, lblS, s->colorText, "MID");
 
-        // EQ Low
-        drawKnob(knobX, 232.0f, knobR, dk.eqLow, s->colorAccent, true);
-        drawText(knobX - 4.0f, 206.0f, lblS, s->colorText, "LO");
+        drawKnob(knobX, 224.0f, knobR,  dk.eqLow,  s->colorAccent, true);
+        drawText(knobX -  4.0f,198.0f, lblS, s->colorText, "LO");
 
-        // Trim
-        drawKnob(knobX, 302.0f, knobR2, dk.gain, 0xFFFFDD00, false);
-        drawText(knobX - 9.0f, 278.0f, lblS, s->colorText, "TRIM");
+        drawKnob(knobX, 288.0f, knobR2, dk.gain,   0xFFFFDD00, false);
+        drawText(knobX -  9.0f,264.0f, lblS, s->colorText, "TRIM");
 
-        // Filter
-        drawKnob(knobX, 367.0f, knobR2, dk.filter, 0xFF00AAFF, false);
-        drawText(knobX - 10.0f, 343.0f, lblS, s->colorText, "FILT");
+        drawKnob(knobX, 342.0f, knobR2, dk.filter, 0xFF00AAFF, false);
+        drawText(knobX - 10.0f,318.0f, lblS, s->colorText, "FILT");
 
-        // ── Volume fader ──────────────────────────────────────────────────
-        // Deck 0: far right. Deck 1: far left.
-        const float volX = mirrored ? (xOff + 52.0f) : (xOff + DW - 50.0f);
-        drawVFader(volX, 48.0f, 360.0f, dk.volume, s->colorAccent);
-        drawText(volX - 6.0f, 368.0f, lblS, s->colorText, "VOL");
+        // ── Volume fader (channel, inner edge) ────────────────────────────
+        const float volX = mirrored ? (xOff + 50.0f) : (xOff + DW - 50.0f);
+        drawVFader(volX, 48.0f, 368.0f, dk.volume, s->colorAccent);
+        drawText(volX - 6.0f, 374.0f, lblS, s->colorText, "VOL");
 
-        // ── Tempo fader ───────────────────────────────────────────────────
-        // Deck 0: far left. Deck 1: far right.
-        const float tmpX = mirrored ? (xOff + DW - 50.0f) : (xOff + 52.0f);
-        drawVFader(tmpX, 48.0f, 360.0f, dk.tempo, 0xFF888888);
-        drawText(tmpX - 14.0f, 368.0f, lblS, s->colorText, "TEMPO");
+        // ── Tempo fader (outer edge) ───────────────────────────────────────
+        const float tmpX = mirrored ? (xOff + DW - 50.0f) : (xOff + 50.0f);
+        drawVFader(tmpX, 48.0f, 368.0f, dk.tempo, 0xFF888888);
+        drawText(tmpX - 14.0f, 374.0f, lblS, s->colorText, "TEMPO");
 
-        // ── Transport buttons (row below jog) ─────────────────────────────
-        const float btnW  = 50.0f;
-        const float btnH  = 27.0f;
-        const float btnSp = 5.0f;
-        const float rowW  = 4.0f * btnW + 3.0f * btnSp;
-        const float bx0   = jogCx - rowW * 0.5f;
-        const float btnY  = jogCy + jogR + 12.0f;
+        // ── Loop controls (above transport row) ───────────────────────────
+        // FLX4 has LOOP IN | RELOOP/EXIT | LOOP OUT above the transport
+        const float lbW  = 58.0f, lbH  = 20.0f, lbSp = 4.0f;
+        const float lbRW = 3.0f * lbW + 2.0f * lbSp;
+        const float lbx0 = jogCx - lbRW * 0.5f;
+        const float lbY  = jogCy + jogR + 8.0f;
 
-        drawButton(bx0,                          btnY, btnW, btnH, dk.playing,    s->colorPlay,  "PLAY");
-        drawButton(bx0 +     (btnW + btnSp),     btnY, btnW, btnH, dk.cueActive,  s->colorCue,   "CUE");
-        drawButton(bx0 + 2.0f*(btnW + btnSp),    btnY, btnW, btnH, dk.syncActive, s->colorSync,  "SYNC");
-        drawButton(bx0 + 3.0f*(btnW + btnSp),    btnY, btnW, btnH, dk.loopActive, s->colorLoop,  "LOOP");
+        drawButton(lbx0,                   lbY, lbW, lbH, dk.loopInActive,  0xFF00CCFF, "IN");
+        drawButton(lbx0 + lbW + lbSp,      lbY, lbW, lbH, dk.reloopActive,  0xFF00CC44, "RELOOP");
+        drawButton(lbx0 + 2*(lbW + lbSp),  lbY, lbW, lbH, dk.loopOutActive, 0xFF00CCFF, "OUT");
 
-        // ── Hot cue pads (bottom strip) ───────────────────────────────────
-        const float padW  = 50.0f;
-        const float padH  = 30.0f;
-        const float padSp = 5.0f;
+        // ── Transport buttons (PLAY / CUE / BEAT SYNC) ────────────────────
+        const float tbW1 = 70.0f, tbW2 = 57.0f, tbH  = 26.0f, tbSp = 4.0f;
+        const float tbRW = tbW1 + 2.0f * tbW2 + 2.0f * tbSp;
+        const float tbx0 = jogCx - tbRW * 0.5f;
+        const float tbY  = lbY + lbH + 4.0f;
+
+        drawButton(tbx0,                        tbY, tbW1, tbH, dk.playing,    s->colorPlay, "PLAY");
+        drawButton(tbx0 + tbW1 + tbSp,          tbY, tbW2, tbH, dk.cueActive,  s->colorCue,  "CUE");
+        drawButton(tbx0 + tbW1 + tbSp + tbW2 + tbSp, tbY, tbW2, tbH, dk.syncActive, s->colorSync, "SYNC");
+
+        // ── Pad mode selector ─────────────────────────────────────────────
+        // HC = Hot Cue  LOOP = Beat Loop  JUMP = Beat Jump  SAMP = Sampler
+        static const char     *kModeLabels[4]  = { "HC", "LOOP", "JUMP", "SAMP" };
+        static const uint32_t  kModeColors[4]  = { 0xFFFF4444,0xFF00CCFF,0xFFFFAA00,0xFFAA44FF };
+        const float mbW  = 46.0f, mbH  = 14.0f, mbSp = 3.0f;
+        const float mbRW = 4.0f * mbW + 3.0f * mbSp;
+        const float mbx0 = jogCx - mbRW * 0.5f;
+        const float mbY  = tbY + tbH + 4.0f;
+
+        for (int m = 0; m < 4; ++m) {
+            const float   mx = mbx0 + (float)m * (mbW + mbSp);
+            const bool    ma = (dk.padMode == m);
+            const uint32_t mc = kModeColors[m];
+            drawRect(mx, mbY, mbW, mbH, ma ? mc : 0xFF222222);
+            drawRect(mx, mbY, mbW, 1.0f, ma ? mc : 0xFF444444);
+            drawRect(mx, mbY, 1.0f, mbH, ma ? mc : 0xFF444444);
+            drawRect(mx + mbW - 1.0f, mbY, 1.0f, mbH, ma ? mc : 0xFF444444);
+            drawRect(mx, mbY + mbH - 1.0f, mbW, 1.0f, ma ? mc : 0xFF444444);
+            const int   mlen = (int)strlen(kModeLabels[m]);
+            const float mts  = std::max(1.0f, std::floor(
+                std::min(mbW / ((float)mlen * 4.0f + 2.0f), mbH / 7.0f)));
+            const float mtw  = ((float)mlen * 4.0f - 1.0f) * mts;
+            const float mth  = 5.0f * mts;
+            drawText(mx + (mbW - mtw) * 0.5f, mbY + (mbH - mth) * 0.5f,
+                     mts, ma ? 0xFFFFFFFF : 0xFF666666, kModeLabels[m]);
+        }
+
+        // ── Performance pads — 8 pads in 2×4 grid ────────────────────────
+        // FLX4 has 8 RGB pads; top row = pads 1–4, bottom row = pads 5–8
+        const float padW  = 46.0f, padH  = 26.0f, padSp = 3.0f;
         const float padRW = 4.0f * padW + 3.0f * padSp;
         const float px0   = jogCx - padRW * 0.5f;
-        const float padY  = btnY + btnH + 8.0f;
+        const float padY1 = mbY + mbH + 3.0f;
+        const float padY2 = padY1 + padH + 3.0f;
 
-        for (int p = 0; p < 4; ++p) {
-            const float flash   = dk.hotCueFlash[p];
-            const uint32_t hc   = s->hotCueColors[p];
-            // Base colour dimmed by 75 %, brightened by flash
-            const float  bright = 0.25f + flash * 0.75f;
-            const uint32_t pc   = 0xFF000000
+        for (int p2 = 0; p2 < 8; ++p2) {
+            const int   row   = p2 / 4;
+            const int   col   = p2 % 4;
+            const float flash = dk.hotCueFlash[p2];
+            const uint32_t hc = s->hotCueColors[p2 % 4];  // cycle through 4 accent colours
+            const float bright = 0.22f + flash * 0.78f;
+            const uint32_t pc  = 0xFF000000
                 | ((uint32_t)(((hc>>16)&0xFF) * bright) << 16)
                 | ((uint32_t)(((hc>> 8)&0xFF) * bright) <<  8)
                 | ((uint32_t)(( hc     &0xFF) * bright));
 
-            const float px = px0 + (float)p * (padW + padSp);
-            drawRect(px,            padY,            padW, padH, pc);
-            drawRect(px,            padY,            padW, 1.0f, 0xFF555555);
-            drawRect(px,            padY + padH-1.f, padW, 1.0f, 0xFF555555);
-            drawRect(px,            padY,            1.0f, padH, 0xFF555555);
-            drawRect(px + padW-1.f, padY,            1.0f, padH, 0xFF555555);
+            const float px = px0 + (float)col * (padW + padSp);
+            const float py = (row == 0) ? padY1 : padY2;
+
+            drawRect(px,            py,            padW, padH, pc);
+            drawRect(px,            py,            padW, 1.0f, 0xFF555555);
+            drawRect(px,            py + padH-1.f, padW, 1.0f, 0xFF555555);
+            drawRect(px,            py,            1.0f, padH, 0xFF555555);
+            drawRect(px + padW-1.f, py,            1.0f, padH, 0xFF555555);
 
             char num[4];
-            snprintf(num, sizeof(num), "%d", p + 1);
-            float nw = (strlen(num) * 4.0f - 1.0f);
-            drawText(px + (padW - nw) * 0.5f, padY + (padH - 5.0f) * 0.5f,
+            snprintf(num, sizeof(num), "%d", p2 + 1);
+            const float nw = ((float)strlen(num) * 4.0f - 1.0f);
+            drawText(px + (padW - nw) * 0.5f, py + (padH - 5.0f) * 0.5f,
                      1.0f, 0xFFFFFFFF, num);
         }
     };

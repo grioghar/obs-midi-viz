@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(obs-midi-viz
-  VERSION 0.1.6.0
+  VERSION 0.1.7.0
   DESCRIPTION "MIDI visualizer plugin for OBS Studio"
   LANGUAGES CXX C
 )
@@ -99,6 +99,8 @@ set(PLUGIN_SOURCES
   src/sources/cc-source.cpp
   src/sources/dj-source.cpp
   src/sources/synth-source.cpp
+  src/osc-receiver.cpp
+  src/sources/daw-source.cpp
 )
 
 add_library(obs-midi-viz MODULE ${PLUGIN_SOURCES})
@@ -113,7 +115,7 @@ target_link_libraries(obs-midi-viz PRIVATE
 )
 
 if(WIN32)
-  target_link_libraries(obs-midi-viz PRIVATE winmm)
+  target_link_libraries(obs-midi-viz PRIVATE winmm ws2_32)
 elseif(APPLE)
   find_library(COREMIDI_LIB  CoreMIDI  REQUIRED)
   find_library(COREAUDIO_LIB CoreAudio REQUIRED)
