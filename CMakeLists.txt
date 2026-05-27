@@ -97,6 +97,7 @@ set(PLUGIN_SOURCES
   src/sources/piano-source.cpp
   src/sources/drum-source.cpp
   src/sources/cc-source.cpp
+  src/sources/dj-source.cpp
 )
 
 add_library(obs-midi-viz MODULE ${PLUGIN_SOURCES})
