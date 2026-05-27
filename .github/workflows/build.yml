@@ -58,7 +58,7 @@ jobs:
           tar -czf ${{ env.PLUGIN_NAME }}-linux-x86_64.tar.gz -C dist .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.PLUGIN_NAME }}-linux-x86_64
           path: ${{ env.PLUGIN_NAME }}-linux-x86_64.tar.gz
@@ -88,7 +88,7 @@ jobs:
       # ── OBS libobs (cached) ─────────────────────────────────────────────
       - name: Cache OBS build
         id: cache-obs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: obs-install
           key: obs-${{ env.OBS_VERSION }}-macos-arm64-v3
@@ -170,7 +170,7 @@ jobs:
           tar -czf ${{ env.PLUGIN_NAME }}-macos-arm64.tar.gz -C dist .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.PLUGIN_NAME }}-macos-arm64
           path: ${{ env.PLUGIN_NAME }}-macos-arm64.tar.gz
@@ -195,14 +195,14 @@ jobs:
           submodules: recursive
 
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: egor-tensin/vs-shell@v2
         with:
           arch: x64
 
       # ── OBS source (headers + cmake config) ──────────────────────────────
       - name: Cache OBS build
         id: cache-obs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             obs-install
@@ -290,7 +290,7 @@ jobs:
             -DestinationPath "${{ env.PLUGIN_NAME }}-windows-x64.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.PLUGIN_NAME }}-windows-x64
           path: ${{ env.PLUGIN_NAME }}-windows-x64.zip
@@ -309,12 +309,12 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           generate_release_notes: true
