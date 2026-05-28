@@ -1063,5 +1063,127 @@ function Write-DawSvg($file) {
 
 Write-DawSvg "$OutDir\daw-session.svg"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. WAVEFORM (AUDIO)   1280 × 200
+#     Rolling stereo waveform — L above centre, R below.
+#     Amplitude-based colour gradient: green → amber → red.
+# ─────────────────────────────────────────────────────────────────────────────
+function Write-WaveformSvg($file) {
+    $W = 1280; $H = 200; $cY = $H / 2
+
+    $sb = [System.Text.StringBuilder]::new()
+    $null = $sb.AppendLine("<?xml version='1.0' encoding='UTF-8'?>")
+    $null = $sb.AppendLine("<svg xmlns='http://www.w3.org/2000/svg' width='$W' height='$H' viewBox='0 0 $W $H'>")
+
+    # Background
+    $null = $sb.AppendLine("<rect width='$W' height='$H' fill='#0A0A0A'/>")
+
+    # Faint centre line
+    $null = $sb.AppendLine("<line x1='0' y1='$cY' x2='$W' y2='$cY' stroke='#2A2A2A' stroke-width='1'/>")
+
+    # Simulate two seconds of stereo audio — a DJ track with regular kick transients.
+    # The waveform is 1280 columns wide.  Each column is 1 px.
+    # Amplitude envelope: slow breathing + periodic kick peaks + random texture.
+    $colData = @()
+    $numCols = $W
+    $pi = [Math]::PI
+
+    for ($x = 0; $x -lt $numCols; $x++) {
+        $t = $x / ($numCols - 1)   # 0..1 across the time window
+
+        # Bass/kick envelope: peaks at 0.0, 0.25, 0.5, 0.75, 1.0 (quarter notes)
+        $kick = 0.0
+        foreach ($beat in @(0.0, 0.25, 0.5, 0.75, 1.0)) {
+            $d = [Math]::Abs($t - $beat)
+            if ($d -lt 0.04) { $kick = [Math]::Max($kick, 1.0 - $d / 0.04) }
+        }
+        $kick = $kick * 0.85
+
+        # Mid-frequency body (music underneath)
+        $body = 0.28 + 0.10 * [Math]::Sin($t * $pi * 6.0)
+
+        # High-frequency texture (slight random-like variation using fast sine)
+        $texture = 0.08 * [Math]::Abs([Math]::Sin($t * $pi * 80.0)) `
+                 + 0.04 * [Math]::Abs([Math]::Sin($t * $pi * 130.0))
+
+        $ampL = [Math]::Min(1.0, $kick + $body + $texture)
+
+        # R channel is similar but with slight phase difference → slightly different shape
+        $kickR = 0.0
+        foreach ($beat in @(0.0, 0.25, 0.5, 0.75, 1.0)) {
+            $d = [Math]::Abs($t - $beat - 0.008)
+            if ($d -lt 0.04) { $kickR = [Math]::Max($kickR, 1.0 - $d / 0.04) }
+        }
+        $kickR = $kickR * 0.82
+        $bodyR = 0.27 + 0.09 * [Math]::Sin($t * $pi * 6.0 + 0.3)
+        $textR = 0.07 * [Math]::Abs([Math]::Sin($t * $pi * 78.0)) `
+               + 0.05 * [Math]::Abs([Math]::Sin($t * $pi * 123.0))
+        $ampR = [Math]::Min(1.0, $kickR + $bodyR + $textR)
+
+        $colData += ,@($ampL, $ampR)
+    }
+
+    # Helper: map amplitude 0..1 to hex colour green→amber→red
+    function wfColor($amp) {
+        if ($amp -lt 0.6) {
+            $t = $amp / 0.6
+            # green #00CC44 → amber #DD8800
+            $r = [int](0x00 + (0xDD - 0x00) * $t)
+            $g = [int](0xCC + (0x88 - 0xCC) * $t)
+            $b = [int](0x44 + (0x00 - 0x44) * $t)
+        } else {
+            $t = ($amp - 0.6) / 0.4
+            # amber #DD8800 → red #FF2200
+            $r = [int](0xDD + (0xFF - 0xDD) * $t)
+            $g = [int](0x88 + (0x22 - 0x88) * $t)
+            $b = 0
+        }
+        return '#{0:X2}{1:X2}{2:X2}' -f $r,$g,$b
+    }
+
+    # Draw waveform columns — group adjacent same-colour columns into rectangles
+    # for smaller SVG output, but simple per-column rects are fine for a mockup.
+    for ($x = 0; $x -lt $numCols; $x++) {
+        $ampL = $colData[$x][0]
+        $ampR = $colData[$x][1]
+
+        $bHL = [Math]::Max(1, [int]($ampL * $cY))
+        $bHR = [Math]::Max(1, [int]($ampR * $cY))
+        $colL = wfColor $ampL
+        $colR = wfColor $ampR
+
+        # L channel — grows upward from centre
+        $yL = $cY - $bHL
+        $null = $sb.AppendLine("<rect x='$x' y='$(fmt $yL)' width='1' height='$bHL' fill='$colL'/>")
+
+        # R channel — grows downward from centre
+        $null = $sb.AppendLine("<rect x='$x' y='$cY' width='1' height='$bHR' fill='$colR'/>")
+    }
+
+    # Channel labels
+    $null = $sb.AppendLine("<text x='6' y='14' fill='#40804060' font-family='Courier New,monospace' font-size='9px'>L</text>")
+    $null = $sb.AppendLine("<text x='6' y='$(fmt ($cY + 20))' fill='#40804060' font-family='Courier New,monospace' font-size='9px'>R</text>")
+
+    # Time ruler at the bottom — every 0.25 s tick
+    $null = $sb.AppendLine("<rect x='0' y='$(fmt ($H-10))' width='$W' height='1' fill='#1E1E1E'/>")
+    for ($tick = 0; $tick -le 8; $tick++) {
+        $tx = [int]($tick * $W / 8)
+        $label = "$(fmt ($tick * 0.25))s"
+        $null = $sb.AppendLine("<line x1='$tx' y1='$(fmt ($H-10))' x2='$tx' y2='$H' stroke='#333333' stroke-width='1'/>")
+        if ($tick -lt 8) {
+            $null = $sb.AppendLine("<text x='$(fmt ($tx+2))' y='$(fmt ($H-1))' fill='#555555' font-family='Courier New,monospace' font-size='7px'>$label</text>")
+        }
+    }
+
+    # Info strip top-right: source name + time window
+    $null = $sb.AppendLine("<text x='$(fmt ($W-6))' y='12' fill='#3A3A3A' font-family='Courier New,monospace' font-size='8px' text-anchor='end'>WAVEFORM · 2.0s · STEREO</text>")
+
+    $null = $sb.AppendLine("</svg>")
+    $sb.ToString() | Set-Content $file -Encoding UTF8
+    Write-Host "$(Split-Path $file -Leaf) done"
+}
+
+Write-WaveformSvg "$OutDir\waveform.svg"
+
 Write-Host "All mockup SVGs written to $OutDir"
 

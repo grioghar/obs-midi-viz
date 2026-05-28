@@ -16,6 +16,7 @@
 | **DJ Controller (MIDI)** | Two-deck Pioneer DDJ-FLX4 (and compatible AlphaTheta controllers) top-down schematic with live-animated jog wheels, 27-dot LED-arc rotary knobs (EQ Hi/Mid/Lo, Trim, Filter), vertical channel faders, horizontal crossfader, loop buttons (Loop In / Reloop / Loop Out), pad mode selector (Hot Cue / Beat Loop / Beat Jump / Sampler), and 8 performance pads per deck; every control driven directly from MIDI CC and Note data using the official DDJ-FLX4 MIDI message specification |
 | **Synth Patch Display (MIDI)** | Full synth parameter panel populated live from MIDI SysEx patch dumps; panels for Behringer DeepMind 12, Korg DSS-1, Alesis QS7.1, and Yamaha PSR-540; sections for VCOs/DCOs, filter, envelopes (ADSR visualizer), LFOs, and FX; real-time CC updates for filter cutoff/resonance; multiple independent instances supported |
 | **Ableton Live (Session View)** | Live session grid showing scenes × tracks with clip status (empty / has clip / playing), per-track stereo level meters with peak-hold, and a transport HUD (BPM, bar/beat position, play state); data received over OSC from the free [AbletonOSC](https://github.com/ideoforms/AbletonOSC) Max for Live device |
+| **Waveform (Audio)** | Real-time rolling stereo waveform that taps OBS's own mixed audio output — no external library or device picker needed; works with any audio OBS is mixing (Rekordbox via virtual cable, Ableton, Desktop Audio, microphones); L channel above centre, R below; amplitude-based colour gradient (green → amber → red); configurable time window (0.5 – 8 s) |
 
 All sources are independent — add, resize, reorder, and show/hide them per scene.
 
@@ -83,6 +84,12 @@ All sources are independent — add, resize, reorder, and show/hide them per sce
 
 *Six tracks (KICK / BASS / SYNTH / KEYS / PERC / PAD) × five scenes (INTRO / VERSE / CHORUS / BRIDGE / OUTRO). The CHORUS scene is currently playing — actively-playing clips glow bright green with a play stripe; clips that exist but are not playing show a coloured border; empty slots are dark. The transport HUD (top) shows 128.00 BPM, bar/beat position, and OSC port. Per-track stereo level meters with peak-hold hairlines run along the bottom of each column. Data is received live over OSC from the free AbletonOSC Max for Live device.*
 
+### Waveform (Audio)
+
+![Waveform source](docs/images/waveform.svg)
+
+*Two seconds of stereo audio from OBS's primary mix. L channel (above the centre line) and R channel (below) each fill toward the centre with amplitude-based colour: green for quiet passages, amber for moderate levels, red for loud transients. The four kick-drum peaks are clearly visible as red spikes at the quarter-note positions. The horizontal rule at the bottom shows a 0 – 2 s time scale. This source requires no device configuration — it automatically taps whatever OBS is mixing and sending to the encoder.*
+
 ---
 
 ## Installation
@@ -95,7 +102,7 @@ Download the latest build artifacts from the [Actions tab](https://github.com/gr
 | **macOS (Apple Silicon)** | `obs-midi-viz-macos-arm64.tar.gz` | Extract, then copy `obs-midi-viz.plugin` → `~/Library/Application Support/obs-studio/plugins/` |
 | **Linux (x86-64)** | `obs-midi-viz-linux-x86_64.tar.gz` | Extract, then copy `obs-midi-viz/` → `~/.config/obs-studio/plugins/` |
 
-Restart OBS, then add sources via **+** → **Keys (MIDI)** / **Drums (MIDI)** / **CC Lanes (MIDI)** / **DJ Controller (MIDI)** / **Synth Patch Display (MIDI)** / **Ableton Live (Session View)**.
+Restart OBS, then add sources via **+** → **Keys (MIDI)** / **Drums (MIDI)** / **CC Lanes (MIDI)** / **DJ Controller (MIDI)** / **Synth Patch Display (MIDI)** / **Ableton Live (Session View)** / **Waveform (Audio)**.
 
 ---
 
@@ -285,7 +292,8 @@ obs-midi-viz/
 │       ├── cc-source.*             # CC Lanes (MIDI) — bar graph
 │       ├── dj-source.*             # DJ Controller (MIDI) — DDJ-FLX4 skin
 │       ├── synth-source.*          # Synth Patch Display (MIDI) — 4-model panels
-│       └── daw-source.*            # Ableton Live (Session View) — OSC bridge
+│       ├── daw-source.*            # Ableton Live (Session View) — OSC bridge
+│       └── waveform-source.*       # Waveform (Audio) — rolling PCM waveform
 └── data/locale/en-US.ini           # OBS Properties panel strings
 ```
 
@@ -429,7 +437,34 @@ position — and reflect it in OBS sources.
 - Rekordbox OSC export (beat/BPM/key); ProDJ Link waveform + metadata via
   [dysentery](https://github.com/Deep-Symmetry/dysentery).
 
-### Phase 8 — Polish 🔜
+### Phase 8 — Waveform & Polish ✅ / 🚧
+
+#### 8a — Waveform (Audio) source ✅
+
+Real-time rolling stereo waveform that taps OBS's own primary output mix via
+`audio_output_connect()`. No external audio library; no device picker; works
+with any audio OBS is mixing.
+
+| Property | Description | Default |
+|---|---|---|
+| Canvas width / height | Source dimensions | 1280 × 200 |
+| Time window | Seconds of audio history displayed | 2.0 s |
+| Display mode | Stereo (L / R separate) or Mono (L+R averaged, mirrored) | Stereo |
+| Color — Low / Mid / High | Gradient stops at 0 % / 60 % / 100 % amplitude | green / amber / red |
+| Background Color | Canvas background | near-black |
+| Show centre line | Faint horizontal divider between L and R channels | on |
+
+**Why this approach beats Rekordbox or Ableton waveform extraction:**
+Rekordbox's beautiful analyzed waveform (the purple/blue CDJ display) requires
+ProDJ Link — a reverse-engineered network protocol where your machine joins the
+network as a "virtual CDJ." Complex, brittle, and requires Rekordbox export
+mode with CDJs on the LAN. AbletonOSC provides no raw audio or rendered
+waveforms at all. Tapping OBS's mix is universal and zero-configuration.
+
+**Rekordbox analyzed waveform** (the per-track beat-grid/colour waveform) is
+still planned via the ProDJ Link path in Phase 7 "still to come."
+
+#### 8b — Polish 🔜
 CPack installers (NSIS for Windows, macOS pkg/dmg, Linux .deb); OBS source icons;
 code signing + notarization for macOS (eliminates xattr requirement);
 per-scene preset save/restore; MIDI channel filtering.

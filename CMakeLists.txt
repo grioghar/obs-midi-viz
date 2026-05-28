@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(obs-midi-viz
-  VERSION 0.1.7.0
+  VERSION 0.1.8.0
   DESCRIPTION "MIDI visualizer plugin for OBS Studio"
   LANGUAGES CXX C
 )
@@ -101,6 +101,7 @@ set(PLUGIN_SOURCES
   src/sources/synth-source.cpp
   src/osc-receiver.cpp
   src/sources/daw-source.cpp
+  src/sources/waveform-source.cpp
 )
 
 add_library(obs-midi-viz MODULE ${PLUGIN_SOURCES})
